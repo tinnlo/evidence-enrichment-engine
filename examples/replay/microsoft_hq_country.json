@@ -1,0 +1,98 @@
+{
+  "search_results": [
+    {
+      "url": "https://www.microsoft.com/en-us/about",
+      "title": "About Microsoft",
+      "snippet": "Microsoft is headquartered in Redmond, Washington, United States.",
+      "provider": "replay",
+      "rank": 1,
+      "domain": "microsoft.com",
+      "source_tier": "official"
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/789019/",
+      "title": "Microsoft SEC filings",
+      "snippet": "Microsoft Corporation is a Washington corporation headquartered in Redmond, Washington.",
+      "provider": "replay",
+      "rank": 2,
+      "domain": "sec.gov",
+      "source_tier": "regulatory"
+    }
+  ],
+  "parsed_documents": [
+    {
+      "url": "https://www.microsoft.com/en-us/about",
+      "title": "About Microsoft",
+      "content_type": "text/html",
+      "text": "Microsoft Corporation is a technology company headquartered in Redmond, Washington, United States.",
+      "excerpt": "Microsoft Corporation is a technology company headquartered in Redmond, Washington, United States.",
+      "document_type": "company_website",
+      "entity_match_score": 1.0,
+      "source_authority_score": 0.95,
+      "freshness_score": 0.9,
+      "accepted_for_analysis": true,
+      "rejection_reason": null
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/789019/",
+      "title": "Microsoft SEC filings",
+      "content_type": "text/html",
+      "text": "Microsoft Corporation is a Washington corporation with principal executive offices in Redmond, Washington, USA.",
+      "excerpt": "Microsoft Corporation is a Washington corporation with principal executive offices in Redmond, Washington, USA.",
+      "document_type": "regulatory_filing",
+      "entity_match_score": 1.0,
+      "source_authority_score": 0.98,
+      "freshness_score": 0.9,
+      "accepted_for_analysis": true,
+      "rejection_reason": null
+    }
+  ],
+  "analysis_reports": [
+    {
+      "source_url": "https://www.microsoft.com/en-us/about",
+      "reasoning": "Official website explicitly states the company is headquartered in the United States.",
+      "claims": [
+        {
+          "field_name": "hq_country",
+          "candidate_value": "USA",
+          "supporting_excerpt": "Microsoft Corporation is a technology company headquartered in Redmond, Washington, United States.",
+          "source_url": "https://www.microsoft.com/en-us/about",
+          "source_title": "About Microsoft",
+          "analysis_confidence": 0.92,
+          "source_authority_score": 0.95,
+          "freshness_score": 0.9,
+          "entity_match_score": 1.0
+        }
+      ]
+    },
+    {
+      "source_url": "https://www.sec.gov/Archives/edgar/data/789019/",
+      "reasoning": "Regulatory filing places principal executive offices in the United States.",
+      "claims": [
+        {
+          "field_name": "hq_country",
+          "candidate_value": "USA",
+          "supporting_excerpt": "Microsoft Corporation is a Washington corporation with principal executive offices in Redmond, Washington, USA.",
+          "source_url": "https://www.sec.gov/Archives/edgar/data/789019/",
+          "source_title": "Microsoft SEC filings",
+          "analysis_confidence": 0.95,
+          "source_authority_score": 0.98,
+          "freshness_score": 0.9,
+          "entity_match_score": 1.0
+        }
+      ]
+    }
+  ],
+  "synthesis": {
+    "value": "USA",
+    "normalized_value": "USA",
+    "reasoning": "Both the official website and a regulatory filing support the same headquarters country.",
+    "synthesis_confidence": 0.93,
+    "supporting_urls": [
+      "https://www.microsoft.com/en-us/about",
+      "https://www.sec.gov/Archives/edgar/data/789019/"
+    ],
+    "conflicts": []
+  }
+}
+

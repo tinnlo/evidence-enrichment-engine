@@ -1,0 +1,20 @@
+default_mode: auto
+replay_dir: examples/replay
+prompt_dir: prompts
+thresholds:
+  hq_country:
+    auto_approve_min_confidence: 0.85
+    review_min_confidence: 0.50
+search:
+  provider_order:
+    - serper
+    - tavily
+analysis:
+  provider_order:
+    - openai
+    - anthropic
+synthesis:
+  provider_order:
+    - openai
+    - anthropic
+

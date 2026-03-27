@@ -1,0 +1,85 @@
+{
+  "search_results": [
+    {
+      "url": "https://en.wikipedia.org/wiki/Microsoft",
+      "title": "Microsoft - Wikipedia",
+      "snippet": "Microsoft is an American multinational technology company.",
+      "provider": "replay",
+      "rank": 1,
+      "domain": "wikipedia.org",
+      "source_tier": "reference"
+    },
+    {
+      "url": "https://www.reuters.com/technology/",
+      "title": "Reuters technology coverage",
+      "snippet": "Reuters covers Microsoft news and technology reporting.",
+      "provider": "replay",
+      "rank": 2,
+      "domain": "reuters.com",
+      "source_tier": "reference"
+    }
+  ],
+  "parsed_documents": [
+    {
+      "url": "https://en.wikipedia.org/wiki/Microsoft",
+      "title": "Microsoft - Wikipedia",
+      "content_type": "text/html",
+      "text": "Microsoft is an American multinational technology company.",
+      "excerpt": "Microsoft is an American multinational technology company.",
+      "document_type": "news_article",
+      "entity_match_score": 1.0,
+      "source_authority_score": 0.45,
+      "freshness_score": 0.7,
+      "accepted_for_analysis": true,
+      "rejection_reason": null
+    },
+    {
+      "url": "https://www.reuters.com/technology/",
+      "title": "Reuters technology coverage",
+      "content_type": "text/html",
+      "text": "Reuters technology pages cover Microsoft and broader market developments.",
+      "excerpt": "Reuters technology pages cover Microsoft and broader market developments.",
+      "document_type": "news_article",
+      "entity_match_score": 0.66,
+      "source_authority_score": 0.85,
+      "freshness_score": 0.7,
+      "accepted_for_analysis": true,
+      "rejection_reason": null
+    }
+  ],
+  "analysis_reports": [
+    {
+      "source_url": "https://en.wikipedia.org/wiki/Microsoft",
+      "reasoning": "The page implies a US company but is not a primary source.",
+      "claims": [
+        {
+          "field_name": "hq_country",
+          "candidate_value": "USA",
+          "supporting_excerpt": "Microsoft is an American multinational technology company.",
+          "source_url": "https://en.wikipedia.org/wiki/Microsoft",
+          "source_title": "Microsoft - Wikipedia",
+          "analysis_confidence": 0.58,
+          "source_authority_score": 0.45,
+          "freshness_score": 0.7,
+          "entity_match_score": 1.0
+        }
+      ]
+    },
+    {
+      "source_url": "https://www.reuters.com/technology/",
+      "reasoning": "The Reuters page is about technology coverage and does not clearly state headquarters.",
+      "claims": []
+    }
+  ],
+  "synthesis": {
+    "value": "USA",
+    "normalized_value": "USA",
+    "reasoning": "Only one weak supporting claim is available, so the answer should stay reviewable.",
+    "synthesis_confidence": 0.58,
+    "supporting_urls": [
+      "https://en.wikipedia.org/wiki/Microsoft"
+    ],
+    "conflicts": []
+  }
+}
+

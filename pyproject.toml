@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "evidence_enrichment"
+version = "0.1.0"
+description = "Evidence-first enrichment engine with search, parsing, analysis, synthesis, and review gates."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "httpx>=0.27.0",
+  "pydantic>=2.7.0",
+  "pyyaml>=6.0.1",
+  "rich>=13.7.0",
+  "typer>=0.12.3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2.0",
+]
+live = [
+  "anthropic>=0.49.0",
+  "openai>=1.30.0",
+]
+
+[project.scripts]
+evidence-enrich = "evidence_enrichment.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["evidence_enrichment"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
