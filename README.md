@@ -1,98 +1,174 @@
 # Evidence Enrichment Engine
 
-`evidence-enrichment-engine` is a public demo repository for an evidence-first enrichment pipeline.
+`evidence-enrichment-engine` is a narrow public demo for context engineering, replay-backed evaluation, and local agent observability around one evidence-backed enrichment workflow.
 
-The repo shows a single explainable path from `fact search` to `text parsing` to `analysis agent` to `synthesis agent`, with provenance, computed confidence, and explicit review gates.
+This public demo rebuilds a production architectural pattern in a public-safe form. It preserves system design, module boundaries, and execution flow while removing proprietary business logic and internal data.
 
-## What It Demonstrates
+## Why This Repo Exists
 
-- Search-first enrichment instead of prompting an LLM directly from raw entity metadata
-- Provider routing and fallback between live providers and replay bundles
-- Text parsing and evidence assessment before analysis
-- Per-document fact extraction with supporting excerpts
-- Final synthesis with computed confidence and review gating
+- What this demo shows: how to structure agent context, inspect agent workflow stages, and evaluate replay-backed behavior against expected outcomes.
+- Which production capability it mirrors: a search-grounded enrichment flow that resolves one structured field from public evidence instead of prompting directly from raw entity inputs.
+- What was intentionally generalized or removed: proprietary business rules, internal datasets, internal URLs, organization-specific runbooks, and production infrastructure assumptions.
+- Why it exists in the portfolio: to show disciplined workflow design and instrumentation without pretending this repo is a broad agent platform.
 
-## V1 Scope
+The repo stays intentionally narrow:
 
-The first public flow enriches one field:
+- one entity anchor: `Microsoft Corporation`
+- one field: `hq_country`
+- one coordinator
+- one replay-safe pipeline
 
-- `hq_country_iso3`
+## Context Engineering
 
-The main demo entity is `Microsoft Corporation`, and the repo also includes a comparison example that contrasts:
+The `context/` directory defines the context pack used by the workflow:
 
-- a baseline path with weak snippet-only evidence
-- an assessed path with parsed primary-source evidence
+- `system_role.md`
+- `task_spec.md`
+- `data_contracts.md`
+- `failure_modes.md`
+- `decision_rubric.md`
+- `context_manifest.yaml`
+
+`context_manifest.yaml` controls:
+
+- load order
+- per-stage context usage
+- priority labels
+- max character budgets
+
+Each run resolves the manifest into a `resolved_context.json` artifact so the workflow shows exactly what context bundle was available to each stage.
+
+## Eval Harness
+
+The repo includes a replay eval harness under `evals/`:
+
+- `cases.yaml` defines replay-backed cases for the same entity under different evidence conditions
+- `run_eval.py` runs the harness
+- `report_schema.json` documents the report shape
+- `output/latest_report.json` stores the latest report
+
+The eval surface is intentionally small. It checks whether the workflow returns the expected value, expected decision, and minimum confidence threshold for a fixed task.
+
+## Observability
+
+The coordinator emits local trace artifacts for these spans:
+
+- `query_plan`
+- `search`
+- `fetch`
+- `parse`
+- `evidence_assessment`
+- `analysis`
+- `synthesis`
+- `review_gate`
+
+Every span records:
+
+- `trace_id`
+- `stage`
+- `provider`
+- `mode`
+- `latency_ms`
+- `entity_id`
+- `field`
+- `input_count`
+- `output_count`
+- `decision` where relevant
+
+Artifacts are written to `examples/output/traces/<trace_id>/`:
+
+- `spans.jsonl`
+- `trace_summary.json`
+- `trace_timeline.md`
+- `openinference_trace.json`
+- `resolved_context.json`
+
+The OpenInference-style JSON is a compatibility export, not a claim of deployed production telemetry infrastructure.
 
 ## Architecture
 
-The coordinator runs fixed stages:
+```text
+context pack
+    ->
+coordinator
+    ->
+query_plan -> search -> fetch -> parse -> evidence_assessment -> analysis -> synthesis -> review_gate
+    ->
+result artifact + resolved_context.json + trace artifacts + eval report
+```
 
-1. Build a `SearchQueryPlan`
-2. Search for evidence candidates
-3. Fetch and parse top documents
-4. Score entity match, authority, and freshness
-5. Run the analysis agent on accepted documents
-6. Run the synthesis agent over the extracted claims
-7. Compute confidence and apply the review gate
+## Replay-First Flow
 
-The replay path uses the same stage contracts, but reads recorded artifacts from `examples/replay/` so the pipeline is still runnable without external credentials.
-
-## Quick Start
-
-Install the package:
+The public-safe default is replay mode. The coordinator can also run in `auto` or `live` mode when credentials are present, but the repository is designed to remain fully runnable without external services.
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-Run the replay-backed demo:
+Run the core demo:
 
 ```bash
-evidence-enrich demo
+evidence-enrich demo --mode replay
 ```
 
-Run the comparison example:
+Resolve the context pack without running the pipeline:
+
+```bash
+evidence-enrich context-pack
+```
+
+Run the trace-focused demo:
+
+```bash
+evidence-enrich trace-demo --mode replay
+```
+
+Run the comparison artifact:
 
 ```bash
 evidence-enrich compare
 ```
 
-Run the field pipeline directly against a JSON entity:
+Run the eval harness:
+
+```bash
+evidence-enrich eval
+```
+
+Run directly on the entity fixture:
 
 ```bash
 evidence-enrich run --entity examples/microsoft.json --field hq_country --mode replay
 ```
 
-## Live Providers
+## Results Snapshot
 
-Live mode is optional. Configure credentials in `.env` based on `.env.example`.
+| Path | Expected Outcome | Decision | Confidence |
+| --- | --- | --- | --- |
+| Baseline replay | `USA` from weak secondary evidence | `needs_review` | `0.75` |
+| Assessed replay | `USA` from agreeing primary sources | `auto_approve` | `0.97` |
+| Eval harness | replay cases pass against expectations | `6/6 pass` | case-dependent |
 
-Supported live adapters:
+## Repo Layout
 
-- Search: `serper`, `tavily`
-- Agents: `openai`, `anthropic`
+```text
+context/
+evals/
+examples/replay/
+examples/output/
+evidence_enrichment/
+tests/
+```
 
-If you run `--mode auto`, the coordinator tries live providers first and falls back to replay when a matching replay bundle exists.
+## Honesty Note
 
-## Output Artifacts
-
-The CLI writes JSON artifacts under `examples/output/`. Each result includes:
-
-- the search plan
-- ranked search results
-- parsed documents
-- analysis reports
-- synthesis output
-- computed confidence
-- final review decision
+This is a public-safe demo of patterns used to structure and inspect agentic workflows. It is deliberately small, local, and replay-driven. It is not presented as a full production observability stack or a general-purpose agent framework.
 
 ## Development
 
-Run tests:
-
 ```bash
 pytest
+python evals/run_eval.py
 ```
 
-The test suite also verifies that the public repo does not contain banned internal identifiers or proprietary references.
-
+The test suite also checks that the repository stays free of banned internal identifiers and company-specific references.

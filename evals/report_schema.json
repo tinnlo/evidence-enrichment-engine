@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Evidence Enrichment Eval Report",
+  "type": "object",
+  "required": ["harness", "summary", "results"],
+  "properties": {
+    "harness": {
+      "type": "object",
+      "required": ["task_name", "field_name", "mode", "case_count"]
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "total_cases",
+        "passed",
+        "failed",
+        "value_match_rate",
+        "decision_match_rate",
+        "average_confidence",
+        "mismatch_counts"
+      ]
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "description",
+          "expected_value",
+          "expected_decision",
+          "minimum_confidence",
+          "actual_value",
+          "actual_decision",
+          "actual_confidence",
+          "pass",
+          "mismatch_reason",
+          "artifact_refs"
+        ]
+      }
+    }
+  }
+}

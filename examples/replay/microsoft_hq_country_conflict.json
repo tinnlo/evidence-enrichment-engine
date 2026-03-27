@@ -1,0 +1,107 @@
+{
+  "search_results": [
+    {
+      "url": "https://www.microsoft.com/en-us/about",
+      "title": "About Microsoft",
+      "snippet": "Microsoft is headquartered in Redmond, Washington, United States.",
+      "provider": "replay",
+      "rank": 1,
+      "domain": "microsoft.com",
+      "source_tier": "official"
+    },
+    {
+      "url": "https://example-registry.test/microsoft",
+      "title": "Registry profile",
+      "snippet": "Profile lists headquarters in Toronto, Canada.",
+      "provider": "replay",
+      "rank": 2,
+      "domain": "example-registry.test",
+      "source_tier": "registry"
+    }
+  ],
+  "parsed_documents": [
+    {
+      "url": "https://www.microsoft.com/en-us/about",
+      "title": "About Microsoft",
+      "content_type": "text/html",
+      "text": "Microsoft Corporation is headquartered in Redmond, Washington, United States.",
+      "excerpt": "Microsoft Corporation is headquartered in Redmond, Washington, United States.",
+      "document_type": "company_website",
+      "entity_match_score": 1.0,
+      "source_authority_score": 0.95,
+      "freshness_score": 0.9,
+      "accepted_for_analysis": true,
+      "rejection_reason": null
+    },
+    {
+      "url": "https://example-registry.test/microsoft",
+      "title": "Registry profile",
+      "content_type": "text/html",
+      "text": "Microsoft Corporation registry profile lists its headquarters as Toronto, Canada.",
+      "excerpt": "Microsoft Corporation registry profile lists its headquarters as Toronto, Canada.",
+      "document_type": "regulatory_filing",
+      "entity_match_score": 1.0,
+      "source_authority_score": 0.92,
+      "freshness_score": 0.88,
+      "accepted_for_analysis": true,
+      "rejection_reason": null
+    }
+  ],
+  "analysis_reports": [
+    {
+      "source_url": "https://www.microsoft.com/en-us/about",
+      "reasoning": "Official website states the headquarters country is the United States.",
+      "claims": [
+        {
+          "field_name": "hq_country",
+          "candidate_value": "USA",
+          "supporting_excerpt": "Microsoft Corporation is headquartered in Redmond, Washington, United States.",
+          "source_url": "https://www.microsoft.com/en-us/about",
+          "source_title": "About Microsoft",
+          "analysis_confidence": 0.92,
+          "source_authority_score": 0.95,
+          "freshness_score": 0.9,
+          "entity_match_score": 1.0
+        }
+      ]
+    },
+    {
+      "source_url": "https://example-registry.test/microsoft",
+      "reasoning": "Registry page conflicts with the official website and claims Canada.",
+      "claims": [
+        {
+          "field_name": "hq_country",
+          "candidate_value": "CAN",
+          "supporting_excerpt": "Microsoft Corporation registry profile lists its headquarters as Toronto, Canada.",
+          "source_url": "https://example-registry.test/microsoft",
+          "source_title": "Registry profile",
+          "analysis_confidence": 0.86,
+          "source_authority_score": 0.92,
+          "freshness_score": 0.88,
+          "entity_match_score": 1.0
+        }
+      ]
+    }
+  ],
+  "synthesis": {
+    "value": "USA",
+    "normalized_value": "USA",
+    "reasoning": "The official site supports USA, but a second high-signal source conflicts.",
+    "synthesis_confidence": 0.9,
+    "supporting_urls": [
+      "https://www.microsoft.com/en-us/about",
+      "https://example-registry.test/microsoft"
+    ],
+    "conflicts": [
+      {
+        "field_name": "hq_country",
+        "candidate_values": ["USA", "CAN"],
+        "source_urls": [
+          "https://www.microsoft.com/en-us/about",
+          "https://example-registry.test/microsoft"
+        ],
+        "reason": "conflicting_country_claims"
+      }
+    ]
+  }
+}

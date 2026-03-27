@@ -1,0 +1,45 @@
+task_name: hq_country_resolution
+field_name: hq_country
+cases:
+  - id: assessed_primary_sources
+    description: Official website and regulatory filing agree on USA.
+    entity_file: evals/fixtures/microsoft.json
+    replay_bundle: examples/replay/microsoft_hq_country.json
+    expected_value: USA
+    expected_decision: auto_approve
+    min_confidence: 0.85
+  - id: snippet_baseline_review
+    description: Weak snippet-level support should remain reviewable.
+    entity_file: evals/fixtures/microsoft.json
+    replay_bundle: examples/replay/microsoft_hq_country_baseline.json
+    expected_value: USA
+    expected_decision: needs_review
+    min_confidence: 0.50
+  - id: conflicting_claims
+    description: Strong but conflicting claims should route to review.
+    entity_file: evals/fixtures/microsoft.json
+    replay_bundle: examples/replay/microsoft_hq_country_conflict.json
+    expected_value: USA
+    expected_decision: needs_review
+    min_confidence: 0.75
+  - id: no_supported_claims
+    description: No accepted claims should auto reject.
+    entity_file: evals/fixtures/microsoft.json
+    replay_bundle: examples/replay/microsoft_hq_country_no_support.json
+    expected_value: null
+    expected_decision: auto_reject
+    min_confidence: 0.00
+  - id: validation_failure
+    description: Non-ISO3 synthesis should fail validation and auto reject.
+    entity_file: evals/fixtures/microsoft.json
+    replay_bundle: examples/replay/microsoft_hq_country_invalid_iso3.json
+    expected_value: null
+    expected_decision: auto_reject
+    min_confidence: 0.00
+  - id: low_signal_single_claim
+    description: A single low-signal claim should stay reviewable.
+    entity_file: evals/fixtures/microsoft.json
+    replay_bundle: examples/replay/microsoft_hq_country_low_signal.json
+    expected_value: USA
+    expected_decision: needs_review
+    min_confidence: 0.50

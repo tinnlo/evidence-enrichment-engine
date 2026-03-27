@@ -1,0 +1,57 @@
+{
+  "search_results": [
+    {
+      "url": "https://directory.example.test/microsoft",
+      "title": "Company directory profile",
+      "snippet": "Directory lists Microsoft as a US software company.",
+      "provider": "replay",
+      "rank": 1,
+      "domain": "directory.example.test",
+      "source_tier": "directory"
+    }
+  ],
+  "parsed_documents": [
+    {
+      "url": "https://directory.example.test/microsoft",
+      "title": "Company directory profile",
+      "content_type": "text/html",
+      "text": "Microsoft appears in a company directory as a US software business.",
+      "excerpt": "Microsoft appears in a company directory as a US software business.",
+      "document_type": "news_article",
+      "entity_match_score": 0.72,
+      "source_authority_score": 0.42,
+      "freshness_score": 0.65,
+      "accepted_for_analysis": true,
+      "rejection_reason": null
+    }
+  ],
+  "analysis_reports": [
+    {
+      "source_url": "https://directory.example.test/microsoft",
+      "reasoning": "This is a secondary directory source and should not auto approve.",
+      "claims": [
+        {
+          "field_name": "hq_country",
+          "candidate_value": "USA",
+          "supporting_excerpt": "Microsoft appears in a company directory as a US software business.",
+          "source_url": "https://directory.example.test/microsoft",
+          "source_title": "Company directory profile",
+          "analysis_confidence": 0.57,
+          "source_authority_score": 0.42,
+          "freshness_score": 0.65,
+          "entity_match_score": 0.72
+        }
+      ]
+    }
+  ],
+  "synthesis": {
+    "value": "USA",
+    "normalized_value": "USA",
+    "reasoning": "One secondary-source claim suggests USA, but the evidence is weak.",
+    "synthesis_confidence": 0.56,
+    "supporting_urls": [
+      "https://directory.example.test/microsoft"
+    ],
+    "conflicts": []
+  }
+}

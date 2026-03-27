@@ -1,0 +1,57 @@
+{
+  "search_results": [
+    {
+      "url": "https://www.microsoft.com/en-us/about",
+      "title": "About Microsoft",
+      "snippet": "Microsoft is headquartered in Redmond, Washington, United States.",
+      "provider": "replay",
+      "rank": 1,
+      "domain": "microsoft.com",
+      "source_tier": "official"
+    }
+  ],
+  "parsed_documents": [
+    {
+      "url": "https://www.microsoft.com/en-us/about",
+      "title": "About Microsoft",
+      "content_type": "text/html",
+      "text": "Microsoft Corporation is headquartered in Redmond, Washington, United States.",
+      "excerpt": "Microsoft Corporation is headquartered in Redmond, Washington, United States.",
+      "document_type": "company_website",
+      "entity_match_score": 1.0,
+      "source_authority_score": 0.95,
+      "freshness_score": 0.9,
+      "accepted_for_analysis": true,
+      "rejection_reason": null
+    }
+  ],
+  "analysis_reports": [
+    {
+      "source_url": "https://www.microsoft.com/en-us/about",
+      "reasoning": "The page clearly states the country, but the synthesis output is intentionally malformed.",
+      "claims": [
+        {
+          "field_name": "hq_country",
+          "candidate_value": "USA",
+          "supporting_excerpt": "Microsoft Corporation is headquartered in Redmond, Washington, United States.",
+          "source_url": "https://www.microsoft.com/en-us/about",
+          "source_title": "About Microsoft",
+          "analysis_confidence": 0.92,
+          "source_authority_score": 0.95,
+          "freshness_score": 0.9,
+          "entity_match_score": 1.0
+        }
+      ]
+    }
+  ],
+  "synthesis": {
+    "value": "United States",
+    "normalized_value": "United States",
+    "reasoning": "The synthesis step returned a descriptive country string instead of ISO3.",
+    "synthesis_confidence": 0.91,
+    "supporting_urls": [
+      "https://www.microsoft.com/en-us/about"
+    ],
+    "conflicts": []
+  }
+}

@@ -44,6 +44,9 @@ class Settings(BaseModel):
     default_mode: str = "auto"
     replay_dir: str = "examples/replay"
     prompt_dir: str = "prompts"
+    context_dir: str = "context"
+    trace_output_dir: str = "examples/output/traces"
+    eval_output_dir: str = "evals/output"
     search: StageProviderConfig = Field(default_factory=StageProviderConfig)
     analysis: StageProviderConfig = Field(default_factory=StageProviderConfig)
     synthesis: StageProviderConfig = Field(default_factory=StageProviderConfig)
@@ -77,8 +80,19 @@ class Settings(BaseModel):
     def replay_path(self) -> Path:
         return Path(self.replay_dir)
 
+    @property
+    def context_path(self) -> Path:
+        return Path(self.context_dir)
+
+    @property
+    def trace_output_path(self) -> Path:
+        return Path(self.trace_output_dir)
+
+    @property
+    def eval_output_path(self) -> Path:
+        return Path(self.eval_output_dir)
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings.load()
-

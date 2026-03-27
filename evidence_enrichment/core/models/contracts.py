@@ -104,11 +104,44 @@ class EnrichmentSource(BaseModel):
     confidence: float = 0.0
 
 
+class ContextEntry(BaseModel):
+    entry_id: str
+    path: str
+    priority: str
+    required: bool = True
+    original_chars: int
+    included_chars: int
+    approx_tokens: int
+    truncated: bool = False
+    included: bool = True
+    content: str = ""
+
+
+class StageContextBundle(BaseModel):
+    stage: str
+    budget_chars: int
+    used_chars: int
+    approx_tokens: int
+    entry_ids: list[str] = Field(default_factory=list)
+    entries: list[ContextEntry] = Field(default_factory=list)
+    excluded_entry_ids: list[str] = Field(default_factory=list)
+
+
+class ResolvedContextBundle(BaseModel):
+    task_name: str
+    manifest_path: str
+    entity_id: str
+    field_name: str
+    load_order: list[str] = Field(default_factory=list)
+    stages: dict[str, StageContextBundle] = Field(default_factory=dict)
+
+
 class PipelineRunResult(BaseModel):
     entity_id: str
     field_name: str
     mode: str
     search_plan: SearchQueryPlan
+    resolved_context: ResolvedContextBundle | None = None
     search_results: list[SearchResult] = Field(default_factory=list)
     parsed_documents: list[ParsedDocument] = Field(default_factory=list)
     analysis_reports: list[AnalysisReport] = Field(default_factory=list)
@@ -118,5 +151,6 @@ class PipelineRunResult(BaseModel):
     decision: ReviewDecision
     gate_reason: str
     output_value: str | None = None
+    trace_id: str | None = None
+    artifact_refs: dict[str, str] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=_utc_now)
-

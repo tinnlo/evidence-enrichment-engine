@@ -1,0 +1,37 @@
+{
+  "search_results": [
+    {
+      "url": "https://news.example.test/microsoft-market-update",
+      "title": "Microsoft market update",
+      "snippet": "Market coverage mentions Microsoft products and earnings.",
+      "provider": "replay",
+      "rank": 1,
+      "domain": "news.example.test",
+      "source_tier": "news"
+    }
+  ],
+  "parsed_documents": [
+    {
+      "url": "https://news.example.test/microsoft-market-update",
+      "title": "Microsoft market update",
+      "content_type": "text/html",
+      "text": "A market update covering Microsoft products and quarterly earnings.",
+      "excerpt": "A market update covering Microsoft products and quarterly earnings.",
+      "document_type": "news_article",
+      "entity_match_score": 0.3,
+      "source_authority_score": 0.4,
+      "freshness_score": 0.7,
+      "accepted_for_analysis": false,
+      "rejection_reason": "low_entity_match"
+    }
+  ],
+  "analysis_reports": [],
+  "synthesis": {
+    "value": null,
+    "normalized_value": null,
+    "reasoning": "No accepted evidence remained after assessment.",
+    "synthesis_confidence": 0.1,
+    "supporting_urls": [],
+    "conflicts": []
+  }
+}

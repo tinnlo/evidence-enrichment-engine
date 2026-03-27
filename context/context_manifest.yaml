@@ -1,0 +1,54 @@
+task_name: hq_country_resolution
+load_order:
+  - system_role
+  - task_spec
+  - data_contracts
+  - failure_modes
+  - decision_rubric
+files:
+  system_role:
+    path: context/system_role.md
+    priority: critical
+    required: true
+  task_spec:
+    path: context/task_spec.md
+    priority: critical
+    required: true
+  data_contracts:
+    path: context/data_contracts.md
+    priority: high
+    required: true
+  failure_modes:
+    path: context/failure_modes.md
+    priority: high
+    required: true
+  decision_rubric:
+    path: context/decision_rubric.md
+    priority: critical
+    required: true
+stages:
+  query_plan:
+    uses: [task_spec, data_contracts]
+    max_chars: 1800
+  search:
+    uses: [task_spec]
+    max_chars: 1200
+  fetch:
+    uses: [data_contracts]
+    max_chars: 1200
+  parse:
+    uses: [data_contracts]
+    max_chars: 1200
+  evidence_assessment:
+    uses: [data_contracts, failure_modes, decision_rubric]
+    max_chars: 2400
+  analysis:
+    uses: [system_role, task_spec, data_contracts, failure_modes]
+    max_chars: 4200
+  synthesis:
+    uses: [system_role, task_spec, decision_rubric, failure_modes]
+    max_chars: 4200
+  review_gate:
+    uses: [decision_rubric, failure_modes]
+    max_chars: 2000
+
