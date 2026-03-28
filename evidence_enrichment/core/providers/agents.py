@@ -8,6 +8,7 @@ from collections import Counter
 from evidence_enrichment.core.models.contracts import AnalysisReport, ConflictManifest, FactClaim, ParsedDocument, SynthesisResult
 from evidence_enrichment.core.models.enums import ProviderType
 from evidence_enrichment.core.providers.base import AnalysisAgent, SynthesisAgent
+from evidence_enrichment.observability.langsmith import apply_langsmith_env
 
 
 def _extract_json(text: str) -> dict:
@@ -19,6 +20,28 @@ def _extract_json(text: str) -> dict:
         return json.loads(text[start : end + 1])
     except json.JSONDecodeError:
         return {}
+
+
+def _wrap_openai_client(client):
+    if not apply_langsmith_env():
+        return client
+    try:
+        from langsmith.wrappers import wrap_openai
+
+        return wrap_openai(client)
+    except Exception:
+        return client
+
+
+def _wrap_anthropic_client(client):
+    if not apply_langsmith_env():
+        return client
+    try:
+        from langsmith.wrappers import wrap_anthropic
+
+        return wrap_anthropic(client)
+    except Exception:
+        return client
 
 
 class OpenAIAnalysisAgent(AnalysisAgent):
@@ -41,7 +64,7 @@ class OpenAIAnalysisAgent(AnalysisAgent):
             f"Title: {document.title}\n"
             f"Text: {document.text[:6000]}"
         )
-        client = AsyncOpenAI(api_key=self.api_key)
+        client = _wrap_openai_client(AsyncOpenAI(api_key=self.api_key))
         response = await client.responses.create(model=self.model, input=prompt)
         parsed = _extract_json(response.output_text)
         claims = [
@@ -87,7 +110,7 @@ class AnthropicAnalysisAgent(AnalysisAgent):
             f"Title: {document.title}\n"
             f"Text: {document.text[:6000]}"
         )
-        client = AsyncAnthropic(api_key=self.api_key)
+        client = _wrap_anthropic_client(AsyncAnthropic(api_key=self.api_key))
         response = await client.messages.create(
             model=self.model,
             max_tokens=800,
@@ -143,7 +166,7 @@ class OpenAISynthesisAgent(SynthesisAgent):
             f"Company: {company_name}\n"
             f"Claims: {json.dumps(payload)}"
         )
-        client = AsyncOpenAI(api_key=self.api_key)
+        client = _wrap_openai_client(AsyncOpenAI(api_key=self.api_key))
         response = await client.responses.create(model=self.model, input=prompt)
         parsed = _extract_json(response.output_text)
         return SynthesisResult(
@@ -182,7 +205,7 @@ class AnthropicSynthesisAgent(SynthesisAgent):
             f"Company: {company_name}\n"
             f"Claims: {json.dumps(payload)}"
         )
-        client = AsyncAnthropic(api_key=self.api_key)
+        client = _wrap_anthropic_client(AsyncAnthropic(api_key=self.api_key))
         response = await client.messages.create(
             model=self.model,
             max_tokens=800,
@@ -213,4 +236,3 @@ def _build_conflicts(field_name: str, claims: list[FactClaim]) -> list[ConflictM
             reason="multiple_candidate_values",
         )
     ]
-

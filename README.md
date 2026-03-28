@@ -141,6 +141,37 @@ Run directly on the entity fixture:
 evidence-enrich run --entity examples/microsoft.json --field hq_country --mode replay
 ```
 
+## Quick Start with Docker
+
+The default container path runs the replay demo, so you can keep provider keys blank unless you want live mode or LangSmith tracing.
+
+```bash
+cp .env.example .env
+docker compose up
+```
+
+Run tests in the same image:
+
+```bash
+docker compose run --rm pipeline pytest tests/
+```
+
+Run the eval harness in the container:
+
+```bash
+docker compose run --rm pipeline evidence-enrich eval
+```
+
+If you want live providers instead of replay, fill in the relevant keys in `.env` and override the command:
+
+```bash
+docker compose run --rm pipeline evidence-enrich demo --mode auto
+```
+
+## Observability
+
+Every run still writes local trace artifacts under `examples/output/traces/<trace_id>/`. If you also enable LangSmith with `LANGSMITH_TRACING=true`, the pipeline records compact stage-level traces for query planning, search, fetch, parsing, evidence assessment, analysis, synthesis, and review gating without changing the pipeline logic. See [docs/observability.md](docs/observability.md) for env setup, stage payloads, and the LangSmith dashboard flow.
+
 ## Results Snapshot
 
 | Path | Expected Outcome | Decision | Confidence |
@@ -169,6 +200,7 @@ This is a public-safe demo of patterns used to structure and inspect agentic wor
 ```bash
 pytest
 python evals/run_eval.py
+ruff check .
 ```
 
 The test suite also checks that the repository stays free of banned internal identifiers and company-specific references.

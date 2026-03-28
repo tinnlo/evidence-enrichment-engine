@@ -5,13 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 
 from evidence_enrichment.evals.harness import run_eval_harness
+from evidence_enrichment.observability.langsmith import flush_langsmith_traces
 
 
 def main() -> None:
-    run_eval_harness(
-        cases_path=Path("evals/cases.yaml"),
-        output_path=Path("evals/output/latest_report.json"),
-    )
+    try:
+        run_eval_harness(
+            cases_path=Path("evals/cases.yaml"),
+            output_path=Path("evals/output/latest_report.json"),
+        )
+    finally:
+        flush_langsmith_traces()
 
 
 if __name__ == "__main__":

@@ -10,6 +10,8 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
+from evidence_enrichment.observability.langsmith import apply_langsmith_env
+
 
 def _parse_env_file(path: Path) -> dict[str, str]:
     if not path.exists():
@@ -74,6 +76,7 @@ class Settings(BaseModel):
         data["anthropic_model"] = os.getenv("ANTHROPIC_MODEL") or env_values.get("ANTHROPIC_MODEL") or data.get("anthropic_model", "claude-3-5-sonnet-latest")
         data["serper_api_key"] = os.getenv("SERPER_API_KEY") or env_values.get("SERPER_API_KEY")
         data["tavily_api_key"] = os.getenv("TAVILY_API_KEY") or env_values.get("TAVILY_API_KEY")
+        apply_langsmith_env(env_values)
         return cls(**data)
 
     @property

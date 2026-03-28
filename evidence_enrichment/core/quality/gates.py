@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from evidence_enrichment.core.models.contracts import FactClaim, PipelineRunResult, SynthesisResult
+from evidence_enrichment.core.models.contracts import FactClaim, SynthesisResult
 from evidence_enrichment.core.models.enums import ReviewDecision
 
 
@@ -43,4 +43,3 @@ def gate_result(overall_confidence: float, claims: list[FactClaim], synthesis: S
     if overall_confidence >= 0.50:
         return ReviewDecision.NEEDS_REVIEW, "mid_confidence"
     return ReviewDecision.AUTO_REJECT, "below_review_band"
-
