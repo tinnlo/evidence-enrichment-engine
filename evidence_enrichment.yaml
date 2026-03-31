@@ -17,4 +17,15 @@ synthesis:
   provider_order:
     - openai
     - anthropic
+retrieval:
+  # Set mode to "local" to enable retrieval-augmented analysis.
+  # Requires OPENAI_API_KEY for embeddings (text-embedding-3-small).
+  mode: "off"
+  persist_path: examples/output/chroma
+  chunk_size: 1500
+  overlap: 200
+  max_table_size: 4000
+  top_k: 5
+  embedding_model: text-embedding-3-small
+  min_doc_chars: 2000
 

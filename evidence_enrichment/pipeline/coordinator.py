@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langsmith import traceable
 
@@ -50,6 +50,10 @@ from evidence_enrichment.observability.langsmith import (
 from evidence_enrichment.observability.tracer import LocalTracer
 from evidence_enrichment.pipeline.replay import load_replay_bundle
 
+if TYPE_CHECKING:
+    from evidence_enrichment.core.retrieval.models import RetrievalResult
+    from evidence_enrichment.core.retrieval.retriever import HybridRetriever
+
 
 class EvidenceCoordinator:
     def __init__(self, settings: Settings | None = None):
@@ -58,6 +62,45 @@ class EvidenceCoordinator:
         self.parser = TextParser()
         self.assessor = EvidenceAssessor()
         self.context_resolver = ContextResolver(self.settings.context_path / "context_manifest.yaml")
+        self._retriever: "HybridRetriever | None" = None
+
+    def _get_retriever(self, entity_id: str) -> "HybridRetriever | None":
+        """Lazy-initialise the HybridRetriever when retrieval mode is active."""
+        rc = self.settings.retrieval
+        if rc.mode != "local":
+            return None
+        if self._retriever is not None and self._retriever.entity_id == entity_id:
+            return self._retriever
+        try:
+            from evidence_enrichment.core.retrieval.chunker import TableAwareChunker
+            from evidence_enrichment.core.retrieval.embedder import OpenAIEmbedder
+            from evidence_enrichment.core.retrieval.retriever import HybridRetriever
+            from evidence_enrichment.core.retrieval.store import ChromaVectorStore
+
+            embedder = OpenAIEmbedder(
+                model=rc.embedding_model,
+                api_key=self.settings.openai_api_key or "",
+            )
+            store = ChromaVectorStore(
+                persist_path=rc.persist_path,
+                embedding_model=rc.embedding_model,
+            )
+            chunker = TableAwareChunker(
+                chunk_size=rc.chunk_size,
+                overlap=rc.overlap,
+                max_table_size=rc.max_table_size,
+            )
+            self._retriever = HybridRetriever(
+                entity_id=entity_id,
+                store=store,
+                embedder=embedder,
+                chunker=chunker,
+                top_k=rc.top_k,
+                weights=rc.weights,
+            )
+        except Exception:
+            self._retriever = None
+        return self._retriever
 
     async def run(
         self,
@@ -184,10 +227,13 @@ class EvidenceCoordinator:
         fetched_documents: list[RetrievedDocument],
         *,
         bundle: dict[str, Any] | None,
+        use_structured: bool = False,
         trace_payload: dict[str, Any],
     ) -> list[ParsedDocument]:
         if bundle is not None:
             return [ParsedDocument(**row) for row in bundle.get("parsed_documents", [])]
+        if use_structured:
+            return [self.parser.parse_with_structure(document) for document in fetched_documents]
         return [self.parser.parse(document) for document in fetched_documents]
 
     @traceable(
@@ -221,6 +267,7 @@ class EvidenceCoordinator:
         field_name: str,
         company_name: str,
         bundle: dict[str, Any] | None,
+        retrieved_chunks_map: "dict[str, list[RetrievalResult]] | None" = None,
         trace_payload: dict[str, Any],
     ) -> tuple[list[AnalysisReport], list[FactClaim], str]:
         analysis_agent = ReplayAnalysisAgent(bundle) if bundle is not None else self._analysis_agent()
@@ -229,7 +276,8 @@ class EvidenceCoordinator:
         for document in documents:
             if not document.accepted_for_analysis:
                 continue
-            report = await analysis_agent.analyze(document, field_name, company_name)
+            retrieved_chunks = (retrieved_chunks_map or {}).get(document.url)
+            report = await analysis_agent.analyze(document, field_name, company_name, retrieved_chunks)
             reports.append(report)
             claims.extend(report.claims)
         return reports, claims, analysis_agent.provider_type.value
@@ -270,6 +318,11 @@ class EvidenceCoordinator:
         }
 
     async def _run_live(self, entity: dict, enricher: BaseEnricher, search_plan, mode: str, tracer: LocalTracer) -> PipelineRunResult:
+        entity_id = str(entity.get("entity_id") or entity.get("id") or "unknown")
+        retriever = self._get_retriever(entity_id)
+        use_structured = retriever is not None
+        rc = self.settings.retrieval
+
         query_count = len([search_plan.primary_query, *search_plan.query_variants])
         with tracer.span("search", provider="provider_chain", input_count=query_count) as span:
             search_results = await self._stage_search(
@@ -296,6 +349,7 @@ class EvidenceCoordinator:
             parsed_documents = self._stage_parse(
                 fetched_documents,
                 bundle=None,
+                use_structured=use_structured,
                 trace_payload={"mode": mode, "urls": [document.url for document in fetched_documents]},
             )
             span["output_count"] = len(parsed_documents)
@@ -310,6 +364,39 @@ class EvidenceCoordinator:
             )
             span["output_count"] = sum(1 for document in assessed_documents if document.accepted_for_analysis)
 
+        # Retrieval indexing stage: index accepted documents above min_doc_chars
+        retrieval_chunk_count = 0
+        retrieved_chunks_map: dict[str, list[RetrievalResult]] = {}
+        if retriever is not None:
+            accepted_for_indexing = [
+                d for d in assessed_documents
+                if d.accepted_for_analysis and len(d.full_text or d.text) >= rc.min_doc_chars
+            ]
+            with tracer.span("retrieval_indexing", provider="chroma", input_count=len(accepted_for_indexing)) as span:
+                total_chunks = 0
+                for document in accepted_for_indexing:
+                    try:
+                        chunks = retriever.index_document(document)
+                        total_chunks += len(chunks)
+                    except Exception:
+                        pass  # Index failures are non-fatal
+                span["output_count"] = total_chunks
+                retrieval_chunk_count = total_chunks
+
+            # Retrieve for each accepted document before analysis
+            with tracer.span("retrieval_query", provider="chroma", input_count=len(accepted_for_indexing)) as span:
+                for document in accepted_for_indexing:
+                    try:
+                        hits = retriever.retrieve(
+                            query=enricher.field_name,
+                            document_url=document.url,
+                        )
+                        if hits:
+                            retrieved_chunks_map[document.url] = hits
+                    except Exception:
+                        pass  # Retrieval failures fall back to raw text
+                span["output_count"] = sum(len(v) for v in retrieved_chunks_map.values())
+
         accepted_documents = [document for document in assessed_documents if document.accepted_for_analysis]
         analysis_provider = self._analysis_agent().provider_type.value
         with tracer.span("analysis", provider=analysis_provider, input_count=len(accepted_documents)) as span:
@@ -318,6 +405,7 @@ class EvidenceCoordinator:
                 field_name=enricher.field_name,
                 company_name=search_plan.metadata.get("company_name", ""),
                 bundle=None,
+                retrieved_chunks_map=retrieved_chunks_map or None,
                 trace_payload={
                     "mode": mode,
                     "accepted_document_urls": [document.url for document in accepted_documents],
@@ -337,7 +425,19 @@ class EvidenceCoordinator:
             )
             span["output_count"] = 1 if synthesis.value else 0
         synthesis = enricher.validate_synthesis(synthesis)
-        return self._build_result(entity, search_plan, mode, search_results, assessed_documents, reports, claims, synthesis, tracer)
+
+        # Collect top retrieval scores for PipelineRunResult
+        all_scores = [
+            r.score
+            for hits in retrieved_chunks_map.values()
+            for r in hits
+        ]
+        top_scores = sorted(all_scores, reverse=True)[: rc.top_k]
+
+        result = self._build_result(entity, search_plan, mode, search_results, assessed_documents, reports, claims, synthesis, tracer)
+        result.retrieval_chunk_count = retrieval_chunk_count
+        result.retrieval_top_scores = top_scores
+        return result
 
     async def _run_with_replay(self, entity: dict, enricher: BaseEnricher, search_plan, bundle: dict, mode: str, tracer: LocalTracer) -> PipelineRunResult:
         query_count = len([search_plan.primary_query, *search_plan.query_variants])
@@ -364,6 +464,7 @@ class EvidenceCoordinator:
             parsed_documents = self._stage_parse(
                 fetched_documents,
                 bundle=bundle,
+                use_structured=False,  # Replay: skip structured parse, use pre-recorded data
                 trace_payload={"mode": mode, "document_count": len(bundle.get("parsed_documents", []))},
             )
             span["output_count"] = len(parsed_documents)
@@ -382,6 +483,7 @@ class EvidenceCoordinator:
                 field_name=enricher.field_name,
                 company_name=search_plan.metadata.get("company_name", ""),
                 bundle=bundle,
+                retrieved_chunks_map=None,  # Replay: no retrieval
                 trace_payload={
                     "mode": mode,
                     "accepted_document_urls": [document.url for document in accepted_documents],

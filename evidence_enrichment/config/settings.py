@@ -42,6 +42,41 @@ class HQCountryThresholds(BaseModel):
     review_min_confidence: float = 0.50
 
 
+class RetrievalConfig(BaseModel):
+    """Configuration for the optional RAG retrieval pipeline.
+
+    mode:
+        "off"   — retrieval disabled (default); pipeline unchanged
+        "local" — embed documents, store in Chroma, retrieve before analysis
+    persist_path:
+        Directory for Chroma persistent storage.
+    chunk_size:
+        Target character count per text chunk.
+    overlap:
+        Character overlap between consecutive text chunks.
+    max_table_size:
+        Max chars before a table block is split (no overlap).
+    top_k:
+        Number of retrieved chunks returned to the analysis prompt.
+    embedding_model:
+        OpenAI embedding model name.
+    weights:
+        Hybrid scoring weights (vector, keyword, table_boost).
+    min_doc_chars:
+        Minimum document character count to index; shorter docs are skipped.
+    """
+
+    mode: str = "off"  # "off" | "local"
+    persist_path: str = "examples/output/chroma"
+    chunk_size: int = 1500
+    overlap: int = 200
+    max_table_size: int = 4000
+    top_k: int = 5
+    embedding_model: str = "text-embedding-3-small"
+    weights: tuple[float, float, float] = (0.7, 0.2, 0.1)
+    min_doc_chars: int = 2000
+
+
 class Settings(BaseModel):
     default_mode: str = "auto"
     replay_dir: str = "examples/replay"
@@ -53,6 +88,7 @@ class Settings(BaseModel):
     analysis: StageProviderConfig = Field(default_factory=StageProviderConfig)
     synthesis: StageProviderConfig = Field(default_factory=StageProviderConfig)
     thresholds: dict[str, HQCountryThresholds] = Field(default_factory=dict)
+    retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     openai_api_key: str | None = None
     openai_model: str = "gpt-4.1-mini"
     anthropic_api_key: str | None = None
