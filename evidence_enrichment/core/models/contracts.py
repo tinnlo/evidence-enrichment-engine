@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -12,6 +13,18 @@ from evidence_enrichment.core.models.enums import DocumentType, ProviderType, Re
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class ContentBlock(BaseModel):
+    """A structural block extracted from a parsed document."""
+
+    block_type: Literal["text", "table", "heading"]
+    content: str
+    char_count: int = 0
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.char_count:
+            self.char_count = len(self.content)
 
 
 class SearchQueryPlan(BaseModel):
@@ -57,6 +70,11 @@ class ParsedDocument(BaseModel):
     freshness_score: float = 0.7
     accepted_for_analysis: bool = False
     rejection_reason: str | None = None
+    # Structured extraction fields (populated by parse_with_structure)
+    full_text: str = ""
+    content_hash: str = ""
+    blocks: list[ContentBlock] = Field(default_factory=list)
+    mime_type: str = ""
 
 
 class FactClaim(BaseModel):
@@ -69,6 +87,7 @@ class FactClaim(BaseModel):
     source_authority_score: float
     freshness_score: float
     entity_match_score: float
+    supporting_chunk_ids: list[str] = Field(default_factory=list)
 
 
 class AnalysisReport(BaseModel):
@@ -154,3 +173,5 @@ class PipelineRunResult(BaseModel):
     trace_id: str | None = None
     artifact_refs: dict[str, str] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=_utc_now)
+    retrieval_chunk_count: int = 0
+    retrieval_top_scores: list[float] = Field(default_factory=list)
