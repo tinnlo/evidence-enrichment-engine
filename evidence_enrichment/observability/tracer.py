@@ -24,6 +24,8 @@ class SpanRecord(BaseModel):
     input_count: int = 0
     output_count: int = 0
     decision: str | None = None
+    chunk_count: int | None = None
+    top_chunk_score: float | None = None
 
 
 class TraceSummary(BaseModel):
