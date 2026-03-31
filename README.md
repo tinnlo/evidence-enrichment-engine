@@ -97,6 +97,36 @@ query_plan -> search -> fetch -> parse -> evidence_assessment -> analysis -> syn
 result artifact + resolved_context.json + trace artifacts + eval report
 ```
 
+## Retrieval-Augmented Analysis (Optional)
+
+An optional RAG layer is available. When enabled (`retrieval.mode: local` in `evidence_enrichment.yaml`), the pipeline:
+
+1. Uses `parse_with_structure` to extract block-level HTML content (headings, tables, text paragraphs)
+2. Chunks accepted documents with a table-aware chunker (tables kept atomic, character-based overlap for text)
+3. Embeds chunks via OpenAI `text-embedding-3-small` and stores them in a local Chroma vector store
+4. Retrieves the top-k most relevant chunks per document using hybrid scoring (vector + keyword + table boost)
+5. Passes retrieved chunks to the analysis agent instead of the default `text[:6000]` truncation
+
+Retrieval is **document-scoped**: each query filters by `document_url` to preserve per-document claim attribution. Replay mode skips retrieval entirely — no embedding API calls, bundles unchanged.
+
+To enable:
+
+```yaml
+# evidence_enrichment.yaml
+retrieval:
+  mode: "local"
+```
+
+Requires `OPENAI_API_KEY` and the `[retrieval]` dependency group:
+
+```bash
+pip install -e ".[retrieval]"
+```
+
+See [docs/retrieval.md](docs/retrieval.md) for the full architecture, chunking rationale, hybrid scoring formula, config reference, and deferred v2 items.
+
+**Privacy note:** Chroma storage (`examples/output/chroma/`) is covered by `.gitignore` and never committed.
+
 ## Replay-First Flow
 
 The public-safe default is replay mode. The coordinator can also run in `auto` or `live` mode when credentials are present, but the repository is designed to remain fully runnable without external services.

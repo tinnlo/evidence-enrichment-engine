@@ -14,7 +14,7 @@ Naive LLM enrichment is brittle: prompts are opaque, results are unrepeatable, a
 
 ## Features
 
-### 8-Stage Pipeline
+### 8-Stage Pipeline (10-Stage with Retrieval)
 
 Each stage has a defined input contract, output contract, and trace span:
 
@@ -23,11 +23,15 @@ Each stage has a defined input contract, output contract, and trace span:
 | `query_plan` | Generates search queries scoped to the target field |
 | `search` | Executes queries via configured providers |
 | `fetch` | Retrieves and normalises page content |
-| `parse` | Extracts field-relevant evidence fragments |
+| `parse` | Extracts field-relevant evidence fragments (structured mode: block-level HTML extraction) |
 | `evidence_assessment` | Scores source reliability and evidence agreement |
-| `analysis` | Reasons over assessed evidence |
+| `retrieval_indexing` | *(optional)* Chunks accepted documents; embeds and upserts into Chroma |
+| `retrieval_query` | *(optional)* Retrieves top-k chunks per document via hybrid scoring |
+| `analysis` | Reasons over assessed evidence (uses retrieved chunks when available) |
 | `synthesis` | Produces a structured field value with confidence |
 | `review_gate` | Blocks low-confidence outputs; flags for human review |
+
+The two retrieval stages are active only when `retrieval.mode: local` is set in `evidence_enrichment.yaml`. When `mode: off` (default), the pipeline is unchanged.
 
 ### Structured Context Pack
 
@@ -72,6 +76,19 @@ Every run writes trace artifacts to `examples/output/traces/<trace_id>/`:
 | `resolved_context.json` | Context bundle snapshot for the run |
 
 Each span records: `trace_id`, `stage`, `provider`, `mode`, `latency_ms`, `input_count`, `output_count`, and `decision` where applicable.
+
+### Retrieval-Augmented Analysis (Optional)
+
+An optional RAG layer can be enabled to replace the default `text[:6000]` truncation with semantically ranked evidence.
+
+**Key design decisions:**
+
+- **Table-aware chunking:** HTML `<table>` elements and plain-text tables (pipe/tab/Markdown-delimited) are kept atomic. Tables are never split mid-row. Large tables split on whitespace boundaries without overlap to avoid duplicating numeric data.
+- **Hybrid scoring:** `0.7 × vector_score + 0.2 × keyword_score + 0.1 × table_boost`. The keyword component anchors exact numeric matches that embeddings compress. The table boost prioritises structured data for financial/numeric queries.
+- **Document-scoped retrieval:** Every query filters by `document_url`. Each document's evidence is retrieved independently, preserving per-document claim attribution through to `FactClaim.source_url`.
+- **Replay safety:** Retrieval is skipped entirely in replay mode. No embedding API calls, no Chroma initialisation, bundles unchanged.
+
+See [docs/retrieval.md](retrieval.md) for full architecture, config reference, and deferred v2 items.
 
 ### LangSmith Integration (Opt-In)
 
