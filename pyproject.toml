@@ -31,9 +31,13 @@ retrieval = [
   "chromadb>=0.6.0",
   "openai>=1.30.0",
 ]
+mcp = [
+  "mcp>=1.0.0",
+]
 
 [project.scripts]
 evidence-enrich = "evidence_enrichment.cli:app"
+evidence-enrich-mcp = "evidence_enrichment._mcp_entry:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["evidence_enrichment"]

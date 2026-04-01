@@ -173,6 +173,97 @@ Run directly on the entity fixture:
 evidence-enrich run --entity examples/microsoft.json --field hq_country --mode replay
 ```
 
+## MCP Server
+
+The engine exposes an MCP (Model Context Protocol) server so any MCP-compatible AI agent can call into the pipeline directly — no UI required.
+
+### Install
+
+```bash
+pip install -e ".[mcp]"
+```
+
+### Run
+
+```bash
+# stdio transport (default) — for Claude Desktop and OpenCode
+evidence-enrich mcp
+
+# HTTP transport — for MCP Inspector or browser clients
+evidence-enrich mcp --transport streamable-http
+# MCP Inspector URL: http://localhost:8000/mcp
+
+# Dedicated entrypoint (same as above)
+evidence-enrich-mcp
+evidence-enrich-mcp --transport streamable-http
+```
+
+All tools default to `replay` mode and require no API keys.
+
+### Connect
+
+**Claude Desktop** — add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "evidence-enrichment": {
+      "command": "evidence-enrich-mcp"
+    }
+  }
+}
+```
+
+**OpenCode** — add to `.opencode/config.json`:
+
+```json
+{
+  "mcp": {
+    "evidence-enrichment": {
+      "type": "local",
+      "command": ["evidence-enrich-mcp"]
+    }
+  }
+}
+```
+
+**MCP Inspector** — run with `--transport streamable-http` and point the Inspector at `http://localhost:8000/mcp`.
+
+### Resources (read-only)
+
+| URI | Description |
+| --- | --- |
+| `evidence://bundles` | JSON list of all 6 replay bundle names and descriptions |
+| `evidence://bundles/{name}` | Raw JSON of a named replay bundle |
+| `evidence://results/latest` | Most recent pipeline result artifact from a CLI run |
+
+### Tools (actions)
+
+| Tool | Description |
+| --- | --- |
+| `list_replay_scenarios` | List all replay bundles with descriptions |
+| `run_enrichment_pipeline` | Run the full 8-stage pipeline; returns complete `PipelineRunResult` |
+| `get_synthesis_result` | Run the pipeline; returns a concise `SynthesisSummary` (value, decision, confidence) |
+| `get_evidence_claims` | Run the pipeline; returns all extracted `FactClaim` objects |
+| `compare_scenarios` | Run two bundles concurrently and return a side-by-side `ScenarioComparison` |
+
+### Prompt
+
+`analyze_entity(entity_name, field_name, scenario)` — guides an agent through interpreting pipeline output, evaluating claim quality, and explaining the review decision.
+
+### Replay Scenarios
+
+| Bundle name | Expected decision | Notes |
+| --- | --- | --- |
+| `microsoft_hq_country` | `auto_approve` | Two agreeing high-authority sources |
+| `microsoft_hq_country_baseline` | `needs_review` | Weak secondary evidence only |
+| `microsoft_hq_country_conflict` | `needs_review` | Conflicting claims across sources |
+| `microsoft_hq_country_no_support` | `auto_reject` | No accepted claims found |
+| `microsoft_hq_country_invalid_iso3` | `auto_reject` | Non-ISO3 synthesis output |
+| `microsoft_hq_country_low_signal` | `needs_review` | Single low-confidence claim |
+
+---
+
 ## Quick Start with Docker
 
 The default container path runs the replay demo, so you can keep provider keys blank unless you want live mode or LangSmith tracing.

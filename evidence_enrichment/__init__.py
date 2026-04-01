@@ -40,3 +40,19 @@ __all__ = [
     "SynthesisResult",
 ]
 
+
+# MCP server symbols — only available when the [mcp] extra is installed.
+# Import lazily to avoid a hard dependency on the `mcp` package.
+def __getattr__(name: str):  # noqa: ANN001, ANN201
+    _mcp_symbols = {
+        "mcp",
+        "ClaimsResult",
+        "ScenarioComparison",
+        "ScenarioInfo",
+        "SynthesisSummary",
+    }
+    if name in _mcp_symbols:
+        from evidence_enrichment import mcp_server as _ms
+
+        return getattr(_ms, name)
+    raise AttributeError(f"module 'evidence_enrichment' has no attribute {name!r}")

@@ -41,23 +41,37 @@ def _demo_entity() -> dict[str, str]:
 def _print_artifacts(result: Any) -> None:
     if not getattr(result, "artifact_refs", None):
         return
-    console.print(f"Resolved context: [bold]{result.artifact_refs.get('resolved_context', 'n/a')}[/bold]")
-    console.print(f"Trace directory: [bold]{result.artifact_refs.get('trace_dir', 'n/a')}[/bold]")
-    console.print(f"Trace summary: [bold]{result.artifact_refs.get('trace_summary', 'n/a')}[/bold]")
+    console.print(
+        f"Resolved context: [bold]{result.artifact_refs.get('resolved_context', 'n/a')}[/bold]"
+    )
+    console.print(
+        f"Trace directory: [bold]{result.artifact_refs.get('trace_dir', 'n/a')}[/bold]"
+    )
+    console.print(
+        f"Trace summary: [bold]{result.artifact_refs.get('trace_summary', 'n/a')}[/bold]"
+    )
 
 
 def _print_named_artifacts(label: str, result: Any) -> None:
     if not getattr(result, "artifact_refs", None):
         return
-    console.print(f"{label} context: [bold]{result.artifact_refs.get('resolved_context', 'n/a')}[/bold]")
-    console.print(f"{label} trace dir: [bold]{result.artifact_refs.get('trace_dir', 'n/a')}[/bold]")
-    console.print(f"{label} trace summary: [bold]{result.artifact_refs.get('trace_summary', 'n/a')}[/bold]")
+    console.print(
+        f"{label} context: [bold]{result.artifact_refs.get('resolved_context', 'n/a')}[/bold]"
+    )
+    console.print(
+        f"{label} trace dir: [bold]{result.artifact_refs.get('trace_dir', 'n/a')}[/bold]"
+    )
+    console.print(
+        f"{label} trace summary: [bold]{result.artifact_refs.get('trace_summary', 'n/a')}[/bold]"
+    )
 
 
 async def _run_pipeline(entity: dict, *, mode: str, replay_bundle: str | None = None):
     coordinator = EvidenceCoordinator()
     enricher = HeadquartersCountryEnricher()
-    return await coordinator.run(entity, enricher, mode=mode, replay_bundle=replay_bundle)
+    return await coordinator.run(
+        entity, enricher, mode=mode, replay_bundle=replay_bundle
+    )
 
 
 def _flush_observability() -> None:
@@ -66,20 +80,34 @@ def _flush_observability() -> None:
 
 @app.command()
 def run(
-    entity: Path = typer.Option(..., exists=True, readable=True, help="Path to entity JSON."),
+    entity: Path = typer.Option(
+        ..., exists=True, readable=True, help="Path to entity JSON."
+    ),
     field: str = typer.Option("hq_country", help="Supported field name."),
     mode: str = typer.Option("auto", help="live, replay, or auto"),
-    replay_bundle: Path | None = typer.Option(None, exists=True, readable=True, help="Optional replay bundle path."),
-    output: Path = typer.Option(Path("examples/output/run_result.json"), help="Output file."),
+    replay_bundle: Path | None = typer.Option(
+        None, exists=True, readable=True, help="Optional replay bundle path."
+    ),
+    output: Path = typer.Option(
+        Path("examples/output/run_result.json"), help="Output file."
+    ),
 ) -> None:
     try:
         if field != "hq_country":
             raise typer.BadParameter("Only hq_country is implemented in v0.1.")
         entity_payload = json.loads(entity.read_text(encoding="utf-8"))
-        result = asyncio.run(_run_pipeline(entity_payload, mode=mode, replay_bundle=str(replay_bundle) if replay_bundle else None))
+        result = asyncio.run(
+            _run_pipeline(
+                entity_payload,
+                mode=mode,
+                replay_bundle=str(replay_bundle) if replay_bundle else None,
+            )
+        )
         _write_json(output, result)
         console.print(f"Saved run artifact to [bold]{output}[/bold]")
-        console.print(f"Decision: [bold]{result.decision.value}[/bold] | Confidence: {result.overall_confidence:.2f}")
+        console.print(
+            f"Decision: [bold]{result.decision.value}[/bold] | Confidence: {result.overall_confidence:.2f}"
+        )
         _print_artifacts(result)
     finally:
         _flush_observability()
@@ -88,7 +116,9 @@ def run(
 @app.command()
 def demo(
     mode: str = typer.Option("auto", help="live, replay, or auto"),
-    output: Path = typer.Option(Path("examples/output/demo_result.json"), help="Output file."),
+    output: Path = typer.Option(
+        Path("examples/output/demo_result.json"), help="Output file."
+    ),
 ) -> None:
     try:
         entity = _demo_entity()
@@ -96,7 +126,9 @@ def demo(
         _write_json(output, result)
         console.print(f"Saved demo artifact to [bold]{output}[/bold]")
         console.print(f"HQ Country: [bold]{result.output_value}[/bold]")
-        console.print(f"Decision: [bold]{result.decision.value}[/bold] | Confidence: {result.overall_confidence:.2f}")
+        console.print(
+            f"Decision: [bold]{result.decision.value}[/bold] | Confidence: {result.overall_confidence:.2f}"
+        )
         _print_artifacts(result)
     finally:
         _flush_observability()
@@ -105,7 +137,9 @@ def demo(
 @app.command("trace-demo")
 def trace_demo(
     mode: str = typer.Option("auto", help="live, replay, or auto"),
-    output: Path = typer.Option(Path("examples/output/trace_demo_result.json"), help="Output file."),
+    output: Path = typer.Option(
+        Path("examples/output/trace_demo_result.json"), help="Output file."
+    ),
 ) -> None:
     try:
         entity = _demo_entity()
@@ -120,7 +154,9 @@ def trace_demo(
 
 @app.command()
 def compare(
-    output: Path = typer.Option(Path("examples/output/compare_result.json"), help="Combined output file."),
+    output: Path = typer.Option(
+        Path("examples/output/compare_result.json"), help="Combined output file."
+    ),
 ) -> None:
     try:
         entity = _demo_entity()
@@ -149,8 +185,18 @@ def compare(
         table.add_column("Value")
         table.add_column("Decision")
         table.add_column("Confidence")
-        table.add_row("Baseline", str(baseline.output_value), baseline.decision.value, f"{baseline.overall_confidence:.2f}")
-        table.add_row("Assessed", str(assessed.output_value), assessed.decision.value, f"{assessed.overall_confidence:.2f}")
+        table.add_row(
+            "Baseline",
+            str(baseline.output_value),
+            baseline.decision.value,
+            f"{baseline.overall_confidence:.2f}",
+        )
+        table.add_row(
+            "Assessed",
+            str(assessed.output_value),
+            assessed.decision.value,
+            f"{assessed.overall_confidence:.2f}",
+        )
         console.print(table)
         console.print(f"Saved comparison artifact to [bold]{output}[/bold]")
         _print_named_artifacts("Baseline", baseline)
@@ -161,9 +207,14 @@ def compare(
 
 @app.command("context-pack")
 def context_pack(
-    entity_id: str = typer.Option("microsoft", help="Entity identifier for the context artifact."),
+    entity_id: str = typer.Option(
+        "microsoft", help="Entity identifier for the context artifact."
+    ),
     field: str = typer.Option("hq_country", help="Supported field name."),
-    output: Path = typer.Option(Path("examples/output/resolved_context.json"), help="Resolved context artifact path."),
+    output: Path = typer.Option(
+        Path("examples/output/resolved_context.json"),
+        help="Resolved context artifact path.",
+    ),
 ) -> None:
     try:
         if field != "hq_country":
@@ -179,8 +230,15 @@ def context_pack(
 
 @app.command("eval")
 def eval_command(
-    cases: Path = typer.Option(Path("evals/cases.yaml"), exists=True, readable=True, help="Path to eval case definitions."),
-    output: Path = typer.Option(Path("evals/output/latest_report.json"), help="Eval report path."),
+    cases: Path = typer.Option(
+        Path("evals/cases.yaml"),
+        exists=True,
+        readable=True,
+        help="Path to eval case definitions.",
+    ),
+    output: Path = typer.Option(
+        Path("evals/output/latest_report.json"), help="Eval report path."
+    ),
 ) -> None:
     try:
         report = run_eval_harness(cases_path=cases, output_path=output)
@@ -205,6 +263,38 @@ def providers_command() -> None:
             "replay_dir": settings.replay_dir,
         }
     )
+
+
+@app.command("mcp")
+def mcp_command(
+    transport: str = typer.Option(
+        "stdio",
+        help="Transport to use: 'stdio' (for agent integration) or 'streamable-http' (for MCP Inspector / browser clients).",
+    ),
+) -> None:
+    """Launch the Evidence Enrichment MCP server.
+
+    Exposes pipeline tools and datasets via the Model Context Protocol so
+    that any MCP-compatible AI agent can call into the enrichment engine.
+
+    Examples:
+
+      evidence-enrich mcp                          # stdio (default)
+      evidence-enrich mcp --transport streamable-http  # HTTP on :8000/mcp
+    """
+    try:
+        from evidence_enrichment.mcp_server import mcp  # noqa: PLC0415
+    except ImportError:
+        console.print(
+            "[bold red]MCP SDK not installed.[/bold red] "
+            "Install with: pip install 'evidence_enrichment[mcp]'"
+        )
+        raise typer.Exit(code=1)
+
+    console.print(f"Starting MCP server (transport=[bold]{transport}[/bold]) ...")
+    if transport == "streamable-http":
+        console.print("Connect at [bold]http://localhost:8000/mcp[/bold]")
+    mcp.run(transport=transport)
 
 
 if __name__ == "__main__":
