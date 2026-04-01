@@ -2,13 +2,29 @@
 
 from __future__ import annotations
 
-import hashlib
+import math
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from evidence_enrichment.core.models.enums import DocumentType, ProviderType, ReviewDecision, SourceType
+from evidence_enrichment.core.models.enums import (
+    DocumentType,
+    ProviderType,
+    ReviewDecision,
+    SourceType,
+)
+
+
+def _clamp_01(v: float) -> float:
+    """Clamp a float to [0.0, 1.0].
+
+    Raises ValueError for non-finite values (NaN, inf) so that malformed
+    provider output fails loudly rather than silently becoming max confidence.
+    """
+    if not math.isfinite(v):
+        raise ValueError(f"Score must be a finite number, got {v!r}")
+    return max(0.0, min(1.0, v))
 
 
 def _utc_now() -> datetime:
@@ -76,6 +92,13 @@ class ParsedDocument(BaseModel):
     blocks: list[ContentBlock] = Field(default_factory=list)
     mime_type: str = ""
 
+    @field_validator(
+        "entity_match_score", "source_authority_score", "freshness_score", mode="after"
+    )
+    @classmethod
+    def _clamp_scores(cls, v: float) -> float:
+        return _clamp_01(v)
+
 
 class FactClaim(BaseModel):
     field_name: str
@@ -88,6 +111,17 @@ class FactClaim(BaseModel):
     freshness_score: float
     entity_match_score: float
     supporting_chunk_ids: list[str] = Field(default_factory=list)
+
+    @field_validator(
+        "analysis_confidence",
+        "source_authority_score",
+        "freshness_score",
+        "entity_match_score",
+        mode="after",
+    )
+    @classmethod
+    def _clamp_scores(cls, v: float) -> float:
+        return _clamp_01(v)
 
 
 class AnalysisReport(BaseModel):
@@ -113,6 +147,11 @@ class SynthesisResult(BaseModel):
     supporting_urls: list[str] = Field(default_factory=list)
     conflicts: list[ConflictManifest] = Field(default_factory=list)
 
+    @field_validator("synthesis_confidence", mode="after")
+    @classmethod
+    def _clamp_confidence(cls, v: float) -> float:
+        return _clamp_01(v)
+
 
 class EnrichmentSource(BaseModel):
     source_type: SourceType
@@ -121,6 +160,11 @@ class EnrichmentSource(BaseModel):
     title: str | None = None
     snippet: str | None = None
     confidence: float = 0.0
+
+    @field_validator("confidence", mode="after")
+    @classmethod
+    def _clamp_confidence(cls, v: float) -> float:
+        return _clamp_01(v)
 
 
 class ContextEntry(BaseModel):
@@ -175,3 +219,5 @@ class PipelineRunResult(BaseModel):
     created_at: datetime = Field(default_factory=_utc_now)
     retrieval_chunk_count: int = 0
     retrieval_top_scores: list[float] = Field(default_factory=list)
+    fallback_from_live: bool = False
+    retrieval_degraded: bool = False

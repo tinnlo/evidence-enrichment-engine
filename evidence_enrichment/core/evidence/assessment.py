@@ -17,7 +17,11 @@ SOURCE_AUTHORITY = {
 def compute_source_authority(domain: str) -> float:
     domain = domain.lower().replace("www.", "")
     for known_domain, score in SOURCE_AUTHORITY.items():
-        if known_domain != "_default" and known_domain in domain:
+        if known_domain == "_default":
+            continue
+        # Exact match or proper subdomain (e.g. data.sec.gov) — prevent
+        # lookalike abuse such as sec.gov.evil.example getting a high score.
+        if domain == known_domain or domain.endswith("." + known_domain):
             return score
     return SOURCE_AUTHORITY["_default"]
 

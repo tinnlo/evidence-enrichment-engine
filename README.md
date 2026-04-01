@@ -58,6 +58,8 @@ The coordinator emits local trace artifacts for these spans:
 - `fetch`
 - `parse`
 - `evidence_assessment`
+- `retrieval_indexing` *(optional)*
+- `retrieval_query` *(optional)*
 - `analysis`
 - `synthesis`
 - `review_gate`
@@ -102,7 +104,7 @@ result artifact + resolved_context.json + trace artifacts + eval report
 An optional RAG layer is available. When enabled (`retrieval.mode: local` in `evidence_enrichment.yaml`), the pipeline:
 
 1. Uses `parse_with_structure` to extract block-level HTML content (headings, tables, text paragraphs)
-2. Chunks accepted documents with a table-aware chunker (tables kept atomic, character-based overlap for text)
+2. Chunks accepted documents with a table-aware chunker (tables kept atomic up to `max_table_size`; larger tables split on whitespace boundaries; character-based overlap for text)
 3. Embeds chunks via OpenAI `text-embedding-3-small` and stores them in a local Chroma vector store
 4. Retrieves the top-k most relevant chunks per document using hybrid scoring (vector + keyword + table boost)
 5. Passes retrieved chunks to the analysis agent instead of the default `text[:6000]` truncation
@@ -129,7 +131,7 @@ See [docs/retrieval.md](docs/retrieval.md) for the full architecture, chunking r
 
 ## Replay-First Flow
 
-The public-safe default is replay mode. The coordinator can also run in `auto` or `live` mode when credentials are present, but the repository is designed to remain fully runnable without external services.
+The default run mode is `auto`: the pipeline attempts to run live when provider credentials are present.  If credentials are missing **and** a replay bundle exists for the entity, it falls back to replay automatically.  If no replay bundle is found, the pipeline proceeds live and will error if credentials are also absent.  To force replay mode unconditionally (no network access, no credentials required), pass `--mode replay`.
 
 ```bash
 pip install -e ".[dev]"
@@ -201,6 +203,8 @@ docker compose run --rm pipeline evidence-enrich demo --mode auto
 ## Observability
 
 Every run still writes local trace artifacts under `examples/output/traces/<trace_id>/`. If you also enable LangSmith with `LANGSMITH_TRACING=true`, the pipeline records compact stage-level traces for query planning, search, fetch, parsing, evidence assessment, analysis, synthesis, and review gating without changing the pipeline logic. See [docs/observability.md](docs/observability.md) for env setup, stage payloads, and the LangSmith dashboard flow.
+
+**Privacy note:** When LangSmith tracing is enabled, the wrapped OpenAI and Anthropic clients also capture raw prompts and full LLM responses — which may include document text and retrieved chunks — in your LangSmith project. Avoid enabling LangSmith when processing sensitive documents.
 
 ## Results Snapshot
 

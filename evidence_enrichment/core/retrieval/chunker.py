@@ -1,9 +1,10 @@
 """Table-aware document chunker.
 
 Adapted from production MVP KB script patterns. Tables are kept as atomic
-chunks to preserve row/column relationships. Large tables are split without
-overlap (splitting on whitespace boundaries). Plain text uses character-based
-chunking with overlap.
+chunks to preserve row/column relationships when they fit within
+``max_table_size``. Large tables that exceed this limit are split on
+whitespace boundaries without overlap, which may split mid-row. Plain text
+uses character-based chunking with overlap.
 """
 
 from __future__ import annotations
@@ -36,6 +37,8 @@ class TableAwareChunker:
         min_size: int = 80,
         max_table_size: int = 4000,
     ) -> None:
+        if overlap >= chunk_size:
+            raise ValueError(f"overlap ({overlap}) must be less than chunk_size ({chunk_size})")
         self.chunk_size = chunk_size
         self.overlap = overlap
         self.min_size = min_size

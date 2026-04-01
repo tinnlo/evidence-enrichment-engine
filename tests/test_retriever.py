@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from evidence_enrichment.core.models.contracts import ContentBlock, ParsedDocument
+from evidence_enrichment.core.models.contracts import ParsedDocument
 from evidence_enrichment.core.retrieval.chunker import TableAwareChunker
-from evidence_enrichment.core.retrieval.models import Chunk, RetrievalResult
+from evidence_enrichment.core.retrieval.models import Chunk
 from evidence_enrichment.core.retrieval.retriever import HybridRetriever, _keyword_score, _table_boost
 from evidence_enrichment.core.retrieval.store import ChromaVectorStore
 
@@ -186,3 +186,48 @@ class TestTopKLimiting:
         retriever.index_document(doc)
         results = retriever.retrieve("headquarters", "https://example.com/k", top_k=2)
         assert len(results) <= 2
+
+
+class TestHybridRetrieverValidation:
+    def _base_kwargs(self, tmp_path):
+        import chromadb
+
+        store = ChromaVectorStore(persist_path=str(tmp_path), embedding_model="fake-embedder")
+        store._client = chromadb.EphemeralClient()
+        return {
+            "entity_id": "ent",
+            "store": store,
+            "embedder": FakeEmbedder(),  # type: ignore[arg-type]
+            "chunker": TableAwareChunker(chunk_size=500, overlap=50, min_size=10),
+        }
+
+    def test_invalid_top_k_raises(self, tmp_path):
+        """top_k < 1 raises ValueError at construction time."""
+        with pytest.raises(ValueError, match="top_k must be >= 1"):
+            HybridRetriever(**self._base_kwargs(tmp_path), top_k=0, weights=(0.7, 0.2, 0.1))
+
+    def test_weights_not_summing_to_one_raises(self, tmp_path):
+        """Weights that don't sum to 1.0 raise ValueError at construction time."""
+        with pytest.raises(ValueError, match="weights must sum to 1.0"):
+            HybridRetriever(**self._base_kwargs(tmp_path), top_k=5, weights=(0.5, 0.2, 0.1))
+
+    def test_weights_wrong_length_raises(self, tmp_path):
+        """A weights tuple with wrong length raises ValueError."""
+        with pytest.raises(ValueError, match="3-tuple"):
+            HybridRetriever(**self._base_kwargs(tmp_path), top_k=5, weights=(0.5, 0.5))  # type: ignore[arg-type]
+
+    def test_negative_weight_raises(self, tmp_path):
+        """A negative weight raises ValueError."""
+        with pytest.raises(ValueError, match=r"\[0\.0, 1\.0\]"):
+            HybridRetriever(**self._base_kwargs(tmp_path), top_k=5, weights=(-0.1, 0.9, 0.2))
+
+    def test_nan_weight_raises(self, tmp_path):
+        """A NaN weight raises ValueError."""
+        import math
+        with pytest.raises(ValueError, match="finite"):
+            HybridRetriever(**self._base_kwargs(tmp_path), top_k=5, weights=(math.nan, 0.5, 0.5))
+
+    def test_valid_weights_accepted(self, tmp_path):
+        """Weights that sum to exactly 1.0 are accepted."""
+        r = HybridRetriever(**self._base_kwargs(tmp_path), top_k=3, weights=(0.6, 0.3, 0.1))
+        assert r.top_k == 3

@@ -37,7 +37,7 @@ class StageProviderConfig(BaseModel):
     provider_order: list[str] = Field(default_factory=list)
 
 
-class HQCountryThresholds(BaseModel):
+class FieldThresholds(BaseModel):
     auto_approve_min_confidence: float = 0.85
     review_min_confidence: float = 0.50
 
@@ -87,7 +87,7 @@ class Settings(BaseModel):
     search: StageProviderConfig = Field(default_factory=StageProviderConfig)
     analysis: StageProviderConfig = Field(default_factory=StageProviderConfig)
     synthesis: StageProviderConfig = Field(default_factory=StageProviderConfig)
-    thresholds: dict[str, HQCountryThresholds] = Field(default_factory=dict)
+    thresholds: dict[str, FieldThresholds] = Field(default_factory=dict)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     openai_api_key: str | None = None
     openai_model: str = "gpt-4.1-mini"

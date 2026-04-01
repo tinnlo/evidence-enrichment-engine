@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class Chunk(BaseModel):

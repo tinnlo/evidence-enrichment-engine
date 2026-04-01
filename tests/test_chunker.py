@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
 
 from evidence_enrichment.core.models.contracts import ContentBlock, ParsedDocument
 from evidence_enrichment.core.retrieval.chunker import TableAwareChunker
-from evidence_enrichment.core.retrieval.models import Chunk
 
 
 def _make_doc(text: str, blocks: list[ContentBlock] | None = None, content_hash: str = "abc123") -> ParsedDocument:
@@ -153,3 +151,17 @@ class TestTableChunking:
         chunks = chunker.chunk(doc)
         indices = [c.index for c in chunks]
         assert indices == sorted(indices)
+
+
+class TestChunkerValidation:
+    def test_overlap_equals_chunk_size_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="overlap"):
+            TableAwareChunker(chunk_size=100, overlap=100)
+
+    def test_overlap_greater_than_chunk_size_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="overlap"):
+            TableAwareChunker(chunk_size=100, overlap=200)

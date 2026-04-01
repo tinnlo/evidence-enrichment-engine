@@ -3,15 +3,30 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import re
 
-from evidence_enrichment.core.fetch.fetcher import html_to_text
-from evidence_enrichment.core.models.contracts import ContentBlock, ParsedDocument, RetrievedDocument
+from evidence_enrichment.core.fetch.fetcher import _SCRIPT_RE, _STYLE_RE, html_to_text
+from evidence_enrichment.core.models.contracts import (
+    ContentBlock,
+    ParsedDocument,
+    RetrievedDocument,
+)
 
 # Patterns for structural HTML extraction
 _TABLE_RE = re.compile(r"<table[^>]*>.*?</table>", re.IGNORECASE | re.DOTALL)
+_ROW_RE = re.compile(r"<tr[^>]*>(.*?)</tr>", re.IGNORECASE | re.DOTALL)
+_CELL_RE = re.compile(r"<t[hd][^>]*>(.*?)</t[hd]>", re.IGNORECASE | re.DOTALL)
 _HEADING_RE = re.compile(r"<h[1-6][^>]*>(.*?)</h[1-6]>", re.IGNORECASE | re.DOTALL)
 _TAG_RE = re.compile(r"<[^>]+>")
+
+# Block-level HTML elements whose closing/opening tags imply a line break.
+# We normalise these to newlines *before* stripping tags so that
+# _detect_text_table() receives text with newlines intact.
+_BLOCK_BREAK_RE = re.compile(
+    r"</?(?:p|div|br|li|dt|dd|blockquote|pre|section|article|header|footer|aside)[^>]*>",
+    re.IGNORECASE,
+)
 
 # Heuristics for plain-text tables (pipe-delimited, tab-delimited, markdown)
 _PIPE_ROW_RE = re.compile(r"^\|.+\|", re.MULTILINE)
@@ -66,6 +81,37 @@ def _strip_tags(html_fragment: str) -> str:
     return " ".join(_TAG_RE.sub(" ", html_fragment).split()).strip()
 
 
+def _html_gap_to_text(html_fragment: str) -> str:
+    """Convert a gap HTML fragment to plain text while preserving paragraph breaks.
+
+    Unlike ``html_to_text()``, this function normalises block-level HTML tags
+    to *double* newlines before stripping remaining tags.  This ensures that
+    ``_split_text_into_blocks()`` — which splits on ``\\n{2,}`` — can
+    correctly identify paragraph boundaries.
+    """
+    text = _SCRIPT_RE.sub(" ", html_fragment)
+    text = _STYLE_RE.sub(" ", text)
+    text = _BLOCK_BREAK_RE.sub("\n\n", text)
+    text = _TAG_RE.sub(" ", text)
+    text = html.unescape(text)
+    lines = [re.sub(r" {2,}", " ", line).strip() for line in text.splitlines()]
+    non_blank = [line for line in lines if line]
+    # Collapse runs of blank lines (produced by adjacent block-level tags)
+    # into a single double-newline separator so _split_text_into_blocks
+    # sees exactly one paragraph break between logical blocks.
+    return "\n\n".join(non_blank)
+
+
+def _serialize_table(table_html: str) -> str:
+    """Serialize an HTML table to pipe-delimited text preserving rows and cells."""
+    rows: list[str] = []
+    for row_match in _ROW_RE.finditer(table_html):
+        cells = [_strip_tags(cell) for cell in _CELL_RE.findall(row_match.group(1))]
+        if cells:
+            rows.append(" | ".join(cells))
+    return "\n".join(rows) if rows else _strip_tags(table_html)
+
+
 def _extract_blocks(body: str) -> list[ContentBlock]:
     """Extract content blocks from HTML, preserving table boundaries.
 
@@ -81,7 +127,7 @@ def _extract_blocks(body: str) -> list[ContentBlock]:
     # --- Pass 1: locate tables and headings by offset ---
     table_spans: list[tuple[int, int, str]] = []  # (start, end, plain_text)
     for m in _TABLE_RE.finditer(body):
-        plain = _strip_tags(m.group())
+        plain = _serialize_table(m.group())
         if plain:
             table_spans.append((m.start(), m.end(), plain))
 
@@ -106,7 +152,9 @@ def _extract_blocks(body: str) -> list[ContentBlock]:
     for s, e, btype, plain in structural:
         if s > cursor:
             gap_html = body[cursor:s]
-            gap_text = html_to_text(gap_html)
+            # Use _html_gap_to_text instead of html_to_text so that newline
+            # structure is preserved; _detect_text_table relies on it.
+            gap_text = _html_gap_to_text(gap_html)
             if gap_text:
                 ordered.extend(_split_text_into_blocks(gap_text, cursor))
         ordered.append((s, btype, plain))
@@ -114,13 +162,13 @@ def _extract_blocks(body: str) -> list[ContentBlock]:
 
     # Trailing text
     if cursor < len(body):
-        tail_text = html_to_text(body[cursor:])
+        tail_text = _html_gap_to_text(body[cursor:])
         if tail_text:
             ordered.extend(_split_text_into_blocks(tail_text, cursor))
 
     # If the body had no structure at all, fall back to plain text blocks
     if not ordered:
-        plain_all = html_to_text(body)
+        plain_all = _html_gap_to_text(body)
         if plain_all:
             ordered.extend(_split_text_into_blocks(plain_all, 0))
 
@@ -139,23 +187,34 @@ def _split_text_into_blocks(
     """Split a plain-text region into paragraph chunks.
 
     Also detects pipe/tab-delimited plain-text tables within the region.
+    Short paragraphs are accumulated and merged with the next paragraph
+    that passes the threshold so that high-signal but brief statements
+    (e.g. "Headquarters: USA") are not silently dropped.
     Returns list of (offset, block_type, content) tuples.
     """
     results: list[tuple[int, str, str]] = []
     paragraphs = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
 
     if not paragraphs:
-        # Single paragraph — check for plain-text table heuristic
         if len(text) >= min_chars:
             btype = _detect_text_table(text)
             results.append((base_offset, btype, text))
         return results
 
+    pending: list[str] = []
     for para in paragraphs:
-        if len(para) < min_chars:
+        pending.append(para)
+        merged = "\n\n".join(pending)
+        if len(merged) < min_chars:
             continue
-        btype = _detect_text_table(para)
-        results.append((base_offset, btype, para))
+        btype = _detect_text_table(merged)
+        results.append((base_offset, btype, merged))
+        pending.clear()
+
+    if pending:
+        tail = "\n\n".join(pending)
+        btype = _detect_text_table(tail)
+        results.append((base_offset, btype, tail))
 
     return results
 
@@ -169,8 +228,9 @@ def _detect_text_table(text: str) -> str:
     if len(pipe_rows) >= 2 or len(tab_rows) >= 2:
         return "table"
     # Markdown separator pattern: row of dashes/pipes
-    separator_count = sum(1 for l in lines if re.match(r"^\|?[-| :]+\|?$", l.strip()))
+    separator_count = sum(
+        1 for line in lines if re.match(r"^\|?[-| :]+\|?$", line.strip())
+    )
     if separator_count >= 1 and len(pipe_rows) >= 1:
         return "table"
     return "text"
-

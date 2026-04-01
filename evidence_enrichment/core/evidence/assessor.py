@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from evidence_enrichment.core.evidence.assessment import compute_freshness_score, compute_source_authority
 from evidence_enrichment.core.evidence.matching import compute_entity_match_score
-from evidence_enrichment.core.fetch.fetcher import registrable_domain
+from evidence_enrichment.core.fetch.fetcher import normalized_hostname
 from evidence_enrichment.core.models.contracts import ParsedDocument
 from evidence_enrichment.core.models.enums import DocumentType
 
 
 class EvidenceAssessor:
     def assess(self, document: ParsedDocument, company_name: str) -> ParsedDocument:
-        domain = registrable_domain(document.url)
+        domain = normalized_hostname(document.url)
         doc_type = DocumentType.COMPANY_WEBSITE if any(
             marker in document.url.lower() for marker in ["/about", "/company", "/corporate", "/contact"]
         ) else DocumentType.UNKNOWN

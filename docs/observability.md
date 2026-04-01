@@ -52,6 +52,10 @@ Replay mode works with blank provider keys. For live mode, also fill in the rele
 
 Legacy `LANGCHAIN_TRACING_V2`, `LANGCHAIN_API_KEY`, and `LANGCHAIN_PROJECT` values are still honored for compatibility, but `LANGSMITH_*` is the preferred naming.
 
+## Privacy Note
+
+When LangSmith tracing is enabled, the wrapped OpenAI and Anthropic clients (`wrap_openai`, `wrap_anthropic`) also capture raw prompts and full LLM responses in your LangSmith project. These prompts may include full document text and retrieved chunks from the RAG layer. Avoid enabling LangSmith tracing when processing sensitive or confidential documents.
+
 ## Viewing Traces
 
 1. Run a traced command locally or in Docker.

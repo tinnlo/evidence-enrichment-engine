@@ -31,6 +31,10 @@ class HeadquartersCountryEnricher(BaseEnricher):
             metadata={"company_name": name, "website": website, "legal_suffix": legal_suffix},
         )
 
+    def retrieval_query(self, entity: dict[str, Any]) -> str:
+        name = str(entity.get("name") or entity.get("company_name") or "").strip()
+        return f"What country is {name} headquartered in?"
+
     def validate_synthesis(self, synthesis: SynthesisResult) -> SynthesisResult:
         value = (synthesis.normalized_value or synthesis.value or "").strip().upper()
         if value and re.fullmatch(r"[A-Z]{3}", value):

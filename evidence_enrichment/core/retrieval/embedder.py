@@ -51,7 +51,7 @@ class OpenAIEmbedder:
             except ImportError as exc:
                 raise ImportError(
                     "openai package is required for embeddings. "
-                    "Install with: pip install 'evidence_enrichment[live]'"
+                    "Install with: pip install 'evidence_enrichment[retrieval]'"
                 ) from exc
             self._client = OpenAI(api_key=self._api_key)
         return self._client

@@ -24,6 +24,7 @@ class SpanRecord(BaseModel):
     input_count: int = 0
     output_count: int = 0
     decision: str | None = None
+    overall_confidence: float | None = None
     chunk_count: int | None = None
     top_chunk_score: float | None = None
 
@@ -33,6 +34,8 @@ class TraceSummary(BaseModel):
     total_spans: int
     total_latency_ms: float
     stages: list[str] = Field(default_factory=list)
+    decision: str | None = None
+    overall_confidence: float | None = None
 
 
 @dataclass
@@ -70,7 +73,7 @@ class LocalTracer:
         input_count: int = 0,
     ) -> Iterator[dict]:
         started = time.perf_counter()
-        payload: dict = {"output_count": 0, "decision": None}
+        payload: dict = {"output_count": 0, "decision": None, "overall_confidence": None}
         try:
             yield payload
         finally:
@@ -87,6 +90,7 @@ class LocalTracer:
                     input_count=input_count,
                     output_count=int(payload.get("output_count", 0)),
                     decision=payload.get("decision"),
+                    overall_confidence=payload.get("overall_confidence"),
                 )
             )
 
@@ -109,6 +113,12 @@ class LocalTracer:
             total_latency_ms=round(sum(span.latency_ms for span in self.spans), 3),
             stages=[span.stage for span in self.spans],
         )
+        # Populate decision and confidence from the review_gate span if present
+        gate_spans = [s for s in self.spans if s.stage == "review_gate"]
+        if gate_spans:
+            last_gate = gate_spans[-1]
+            summary.decision = last_gate.decision
+            summary.overall_confidence = last_gate.overall_confidence
         summary_path.write_text(summary.model_dump_json(indent=2), encoding="utf-8")
 
         timeline_lines = [f"# Trace Timeline: {self.trace_id}", ""]

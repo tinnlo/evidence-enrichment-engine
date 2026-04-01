@@ -9,18 +9,12 @@ Covers:
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 
 from evidence_enrichment.config.settings import RetrievalConfig, Settings
 from evidence_enrichment.core.models.contracts import (
-    AnalysisReport,
-    FactClaim,
     ParsedDocument,
-    SynthesisResult,
 )
-from evidence_enrichment.core.models.enums import ProviderType, ReviewDecision
 from evidence_enrichment.core.providers.agents import _build_analysis_context
 from evidence_enrichment.core.retrieval.models import Chunk, RetrievalResult
 
@@ -93,7 +87,7 @@ class TestBuildAnalysisContext:
     def test_multiple_chunks_ordered(self):
         doc = _make_parsed_doc()
         chunks = [
-            _make_retrieval_result(_make_chunk(f"a" * 16, f"chunk content {i}"), score=0.9 - i * 0.1)
+            _make_retrieval_result(_make_chunk("a" * 16, f"chunk content {i}"), score=0.9 - i * 0.1)
             for i in range(3)
         ]
         context, chunk_ids = _build_analysis_context(doc, chunks)
@@ -158,7 +152,7 @@ class TestCoordinatorGetRetriever:
         coordinator = EvidenceCoordinator(settings=settings)
         # Should not raise — returns None gracefully when API key is missing/empty
         # (embedder may initialise but won't call API until embed_texts is called)
-        retriever = coordinator._get_retriever("test_entity")
+        coordinator._get_retriever("test_entity")
         # May return a retriever object OR None depending on lazy init — either is fine
         # The important thing is no exception is raised
         assert True  # No exception = pass
@@ -171,7 +165,6 @@ class TestCoordinatorGetRetriever:
 class TestReplaySkipsRetrieval:
     def test_replay_analysis_agent_ignores_chunks(self):
         """ReplayAnalysisAgent.analyze() accepts retrieved_chunks but ignores them."""
-        import asyncio
 
         from evidence_enrichment.core.analysis.replay import ReplayAnalysisAgent
 
@@ -205,7 +198,6 @@ class TestReplaySkipsRetrieval:
 
     def test_replay_analysis_no_retrieved_chunks_arg(self):
         """ReplayAnalysisAgent works without retrieved_chunks (old call-site)."""
-        import asyncio
 
         from evidence_enrichment.core.analysis.replay import ReplayAnalysisAgent
 

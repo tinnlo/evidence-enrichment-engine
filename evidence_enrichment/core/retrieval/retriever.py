@@ -15,6 +15,7 @@ preserve per-document claim attribution.
 
 from __future__ import annotations
 
+import math
 import re
 
 from evidence_enrichment.core.models.contracts import ParsedDocument
@@ -26,11 +27,42 @@ from evidence_enrichment.core.retrieval.store import ChromaVectorStore
 # Keywords that signal a numeric/financial query — triggers table boost
 _NUMERIC_KEYWORDS = frozenset(
     [
-        "revenue", "profit", "loss", "earnings", "ebitda", "eps", "shares",
-        "employees", "headcount", "staff", "salary", "wage", "cost", "price",
-        "total", "sum", "count", "number", "million", "billion", "thousand",
-        "percent", "%", "$", "€", "£", "¥", "quarterly", "annual", "fiscal",
-        "q1", "q2", "q3", "q4", "fy", "ytd",
+        "revenue",
+        "profit",
+        "loss",
+        "earnings",
+        "ebitda",
+        "eps",
+        "shares",
+        "employees",
+        "headcount",
+        "staff",
+        "salary",
+        "wage",
+        "cost",
+        "price",
+        "total",
+        "sum",
+        "count",
+        "number",
+        "million",
+        "billion",
+        "thousand",
+        "percent",
+        "%",
+        "$",
+        "€",
+        "£",
+        "¥",
+        "quarterly",
+        "annual",
+        "fiscal",
+        "q1",
+        "q2",
+        "q3",
+        "q4",
+        "fy",
+        "ytd",
     ]
 )
 
@@ -56,7 +88,9 @@ def _table_boost(query: str, chunk: Chunk) -> float:
         return 0.0
     query_lower = query.lower()
     query_tokens = set(re.findall(r"\w+", query_lower))
-    if query_tokens & _NUMERIC_KEYWORDS or any(sym in query_lower for sym in ("$", "€", "£", "¥", "%")):
+    if query_tokens & _NUMERIC_KEYWORDS or any(
+        sym in query_lower for sym in ("$", "€", "£", "¥", "%")
+    ):
         return 0.1
     return 0.0
 
@@ -94,7 +128,26 @@ class HybridRetriever:
         self.store = store
         self.embedder = embedder
         self.chunker = chunker or TableAwareChunker()
+        if top_k < 1:
+            raise ValueError(f"top_k must be >= 1, got {top_k}")
         self.top_k = top_k
+        if len(weights) != 3:
+            raise ValueError(
+                f"weights must be a 3-tuple (w_vector, w_keyword, w_table), got length {len(weights)}"
+            )
+        if any(not math.isfinite(w) for w in weights):
+            raise ValueError(
+                f"Each weight must be a finite number, got weights={weights}"
+            )
+        if any(w < 0.0 or w > 1.0 for w in weights):
+            raise ValueError(
+                f"Each weight must be in [0.0, 1.0], got weights={weights}"
+            )
+        weight_sum = sum(weights)
+        if abs(weight_sum - 1.0) > 1e-6:
+            raise ValueError(
+                f"Retrieval weights must sum to 1.0, got {weight_sum} (weights={weights})"
+            )
         self.w_vector, self.w_keyword, self.w_table = weights
 
     # ------------------------------------------------------------------
@@ -105,6 +158,9 @@ class HybridRetriever:
         """Chunk and embed a document, upsert into Chroma, return chunks."""
         chunks = self.chunker.chunk(document)
         if not chunks:
+            # Evict any stale chunks from a previous index so that a page
+            # that now yields no content doesn't leave old evidence queryable.
+            self.store.evict_document(self.entity_id, document.url)
             return []
         texts = [c.content for c in chunks]
         embeddings = self.embedder.embed_texts(texts)
@@ -132,7 +188,12 @@ class HybridRetriever:
         top_k:
             Override instance-level top_k.
         """
-        k = top_k or self.top_k
+        if top_k is not None:
+            if top_k < 1:
+                raise ValueError(f"top_k override must be >= 1, got {top_k}")
+            k = top_k
+        else:
+            k = self.top_k
         query_embedding = self.embedder.embed_query(query)
         if not query_embedding:
             return []

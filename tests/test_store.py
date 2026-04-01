@@ -190,6 +190,38 @@ class TestMetadataFiltering:
         assert type_map.get("text_01") == "text"
 
 
+class TestStaleChunkEviction:
+    def test_reingest_replaces_old_chunks(self, store):
+        """Re-indexing a document_url replaces old chunks, not accumulates them."""
+        url = "https://example.com/doc"
+        # First ingest: 3 chunks
+        chunks_v1 = _make_chunks(3, document_url=url)
+        store.upsert("ent_stale", chunks_v1, _fake_embed(3))
+        results_v1 = store.query("ent_stale", [1.0] + [0.0] * 7, top_k=10,
+                                  where={"document_url": url})
+        assert len(results_v1) == 3
+
+        # Second ingest: 2 chunks with NEW content_hash (document changed)
+        chunks_v2 = [
+            Chunk(
+                chunk_id=f"v2_chunk{i:04d}",
+                document_url=url,
+                content_hash="hash_v2",
+                index=i,
+                content=f"Updated chunk {i} with new content.",
+                chunk_type="text",
+            )
+            for i in range(2)
+        ]
+        store.upsert("ent_stale", chunks_v2, _fake_embed(2))
+        results_v2 = store.query("ent_stale", [1.0] + [0.0] * 7, top_k=10,
+                                  where={"document_url": url})
+        # Should have exactly 2 chunks (v1 chunks purged), not 5
+        assert len(results_v2) == 2
+        returned_hashes = {r.chunk.content_hash for r in results_v2}
+        assert returned_hashes == {"hash_v2"}, "Old chunks should not survive re-ingest"
+
+
 class TestCollectionNaming:
     def test_collection_name_format(self):
         """Collection name matches the expected pattern."""
@@ -208,3 +240,18 @@ class TestCollectionNaming:
         """Collection name is always at least 3 chars (Chroma minimum)."""
         name = _collection_name("x", "m")
         assert len(name) >= 3
+
+
+class TestUpsertValidation:
+    def test_mismatched_lengths_raise(self, store):
+        """upsert() raises ValueError when chunks and embeddings differ in length."""
+        chunks = _make_chunks(3)
+        embeddings = _fake_embed(2)  # deliberately shorter
+        with pytest.raises(ValueError, match="same length"):
+            store.upsert("ent_mismatch", chunks, embeddings)
+
+    def test_matching_lengths_accepted(self, store):
+        """upsert() succeeds when chunks and embeddings are the same length."""
+        chunks = _make_chunks(2)
+        embeddings = _fake_embed(2)
+        store.upsert("ent_match", chunks, embeddings)  # should not raise

@@ -50,9 +50,9 @@ Every run resolves the manifest into a `resolved_context.json` artifact — the 
 
 ### Replay-First Execution
 
-The default run mode is replay: pre-recorded search and fetch responses substitute for live providers. The full pipeline runs, traces, and evaluates with no external credentials or network access required.
+The default run mode is `auto`: the pipeline attempts to run live when provider credentials are present.  If credentials are missing **and** a replay bundle exists for the entity, it falls back to replay automatically.  If no replay bundle is found, the pipeline proceeds live and will error if credentials are also absent.  To force replay mode unconditionally (no network access, no credentials required), pass `--mode replay`.
 
-Live mode (`--mode live`) and auto-fallback mode (`--mode auto`) are available when provider keys are present.
+Live mode (`--mode live`) is also available when provider keys are present.
 
 ### Eval Harness
 
@@ -70,7 +70,7 @@ Every run writes trace artifacts to `examples/output/traces/<trace_id>/`:
 | File | Content |
 |---|---|
 | `spans.jsonl` | One JSON line per stage span |
-| `trace_summary.json` | Pipeline-level summary with decision and confidence |
+| `trace_summary.json` | Pipeline-level summary: `trace_id`, `total_spans`, `total_latency_ms`, `stages`, `decision`, `overall_confidence` |
 | `trace_timeline.md` | Human-readable stage timeline |
 | `openinference_trace.json` | OpenInference-compatible compatibility export |
 | `resolved_context.json` | Context bundle snapshot for the run |
@@ -83,7 +83,7 @@ An optional RAG layer can be enabled to replace the default `text[:6000]` trunca
 
 **Key design decisions:**
 
-- **Table-aware chunking:** HTML `<table>` elements and plain-text tables (pipe/tab/Markdown-delimited) are kept atomic. Tables are never split mid-row. Large tables split on whitespace boundaries without overlap to avoid duplicating numeric data.
+- **Table-aware chunking:** HTML `<table>` elements and plain-text tables (pipe/tab/Markdown-delimited) are kept as atomic chunks when they fit within `max_table_size`. Large tables that exceed the limit are split on whitespace boundaries without overlap to avoid duplicating numeric data (note: this may break row boundaries for very large tables).
 - **Hybrid scoring:** `0.7 × vector_score + 0.2 × keyword_score + 0.1 × table_boost`. The keyword component anchors exact numeric matches that embeddings compress. The table boost prioritises structured data for financial/numeric queries.
 - **Document-scoped retrieval:** Every query filters by `document_url`. Each document's evidence is retrieved independently, preserving per-document claim attribution through to `FactClaim.source_url`.
 - **Replay safety:** Retrieval is skipped entirely in replay mode. No embedding API calls, no Chroma initialisation, bundles unchanged.
