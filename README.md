@@ -198,6 +198,8 @@ evidence-enrich-mcp
 evidence-enrich-mcp --transport streamable-http
 ```
 
+The dedicated `evidence-enrich-mcp` entrypoint requires the `[mcp]` extra. In a base install without that extra, it exits with installation guidance instead of raising a traceback.
+
 All tools default to `replay` mode and require no API keys.
 
 ### Connect
@@ -235,7 +237,7 @@ All tools default to `replay` mode and require no API keys.
 | --- | --- |
 | `evidence://bundles` | JSON list of all 6 replay bundle names and descriptions |
 | `evidence://bundles/{name}` | Raw JSON of a named replay bundle |
-| `evidence://results/latest` | Most recent pipeline result artifact from a CLI run |
+| `evidence://results/latest` | Newest pipeline result artifact by modification time from a CLI run |
 
 ### Tools (actions)
 
