@@ -8,6 +8,19 @@ from typing import TYPE_CHECKING, Any
 
 from langsmith import traceable
 
+try:
+    from langfuse import observe  # type: ignore[import-untyped]
+except ImportError:
+
+    def observe(*args, **kwargs):  # type: ignore[misc]
+        """No-op fallback when langfuse is not installed."""
+
+        def _decorator(fn):
+            return fn
+
+        return _decorator
+
+
 from evidence_enrichment.config.settings import FieldThresholds, Settings, get_settings
 from evidence_enrichment.core.analysis.replay import ReplayAnalysisAgent
 from evidence_enrichment.context.resolver import ContextResolver
@@ -43,6 +56,7 @@ from evidence_enrichment.core.quality.gates import (
 )
 from evidence_enrichment.core.search.query_planner import score_search_result
 from evidence_enrichment.core.synthesis.replay import ReplaySynthesisAgent
+from evidence_enrichment.observability.langfuse import record_stage_observation
 from evidence_enrichment.observability.langsmith import (
     summarize_analysis_stage,
     summarize_assessed_documents,
@@ -206,6 +220,9 @@ class EvidenceCoordinator:
             return Path(replay_bundle)
         return self.settings.replay_path / f"{enricher.replay_slug(entity)}.json"
 
+    @observe(
+        name="query_plan", as_type="chain", capture_input=False, capture_output=False
+    )
     @traceable(
         name="query_plan",
         run_type="chain",
@@ -219,8 +236,13 @@ class EvidenceCoordinator:
         *,
         trace_payload: dict[str, Any],
     ):
-        return enricher.build_query_plan(entity)
+        result = enricher.build_query_plan(entity)
+        record_stage_observation(
+            "query_plan", trace_payload, result, summarize_query_plan
+        )
+        return result
 
+    @observe(name="search", as_type="chain", capture_input=False, capture_output=False)
     @traceable(
         name="search",
         run_type="chain",
@@ -235,9 +257,18 @@ class EvidenceCoordinator:
         trace_payload: dict[str, Any],
     ) -> list[SearchResult]:
         if bundle is not None:
-            return [SearchResult(**row) for row in bundle.get("search_results", [])]
-        return await self._search_live(search_plan)
+            result = [SearchResult(**row) for row in bundle.get("search_results", [])]
+            record_stage_observation(
+                "search", trace_payload, result, summarize_search_results
+            )
+            return result
+        result = await self._search_live(search_plan)
+        record_stage_observation(
+            "search", trace_payload, result, summarize_search_results
+        )
+        return result
 
+    @observe(name="fetch", as_type="chain", capture_input=False, capture_output=False)
     @traceable(
         name="fetch",
         run_type="chain",
@@ -255,7 +286,7 @@ class EvidenceCoordinator:
             parsed_documents = [
                 ParsedDocument(**row) for row in bundle.get("parsed_documents", [])
             ]
-            return [
+            result = [
                 RetrievedDocument(
                     url=document.url,
                     final_url=document.url,
@@ -267,8 +298,17 @@ class EvidenceCoordinator:
                 )
                 for document in parsed_documents
             ]
-        return await self._fetch_documents(search_results)
+            record_stage_observation(
+                "fetch", trace_payload, result, summarize_fetched_documents
+            )
+            return result
+        result = await self._fetch_documents(search_results)
+        record_stage_observation(
+            "fetch", trace_payload, result, summarize_fetched_documents
+        )
+        return result
 
+    @observe(name="parse", as_type="chain", capture_input=False, capture_output=False)
     @traceable(
         name="parse",
         run_type="chain",
@@ -284,14 +324,31 @@ class EvidenceCoordinator:
         trace_payload: dict[str, Any],
     ) -> list[ParsedDocument]:
         if bundle is not None:
-            return [ParsedDocument(**row) for row in bundle.get("parsed_documents", [])]
+            result = [
+                ParsedDocument(**row) for row in bundle.get("parsed_documents", [])
+            ]
+            record_stage_observation(
+                "parse", trace_payload, result, summarize_parsed_documents
+            )
+            return result
         if use_structured:
-            return [
+            result = [
                 self.parser.parse_with_structure(document)
                 for document in fetched_documents
             ]
-        return [self.parser.parse(document) for document in fetched_documents]
+        else:
+            result = [self.parser.parse(document) for document in fetched_documents]
+        record_stage_observation(
+            "parse", trace_payload, result, summarize_parsed_documents
+        )
+        return result
 
+    @observe(
+        name="evidence_assessment",
+        as_type="chain",
+        capture_input=False,
+        capture_output=False,
+    )
     @traceable(
         name="evidence_assessment",
         run_type="chain",
@@ -307,12 +364,25 @@ class EvidenceCoordinator:
         trace_payload: dict[str, Any],
     ) -> list[ParsedDocument]:
         if bundle is not None:
+            record_stage_observation(
+                "evidence_assessment",
+                trace_payload,
+                parsed_documents,
+                summarize_assessed_documents,
+            )
             return parsed_documents
-        return [
+        result = [
             self.assessor.assess(document, company_name)
             for document in parsed_documents
         ]
+        record_stage_observation(
+            "evidence_assessment", trace_payload, result, summarize_assessed_documents
+        )
+        return result
 
+    @observe(
+        name="analysis", as_type="chain", capture_input=False, capture_output=False
+    )
     @traceable(
         name="analysis",
         run_type="chain",
@@ -370,8 +440,15 @@ class EvidenceCoordinator:
                 f"All {accepted_count} document analysis call(s) failed; "
                 "cannot produce claims."
             )
-        return reports, claims, analysis_agent.provider_type.value
+        result = (reports, claims, analysis_agent.provider_type.value)
+        record_stage_observation(
+            "analysis", trace_payload, result, summarize_analysis_stage
+        )
+        return result
 
+    @observe(
+        name="synthesis", as_type="chain", capture_input=False, capture_output=False
+    )
     @traceable(
         name="synthesis",
         run_type="chain",
@@ -408,8 +485,15 @@ class EvidenceCoordinator:
                 reasoning="Synthesis failed: provider returned unparseable response.",
                 synthesis_confidence=0.0,
             )
-        return synthesis, synthesis_agent.provider_type.value
+        result = (synthesis, synthesis_agent.provider_type.value)
+        record_stage_observation(
+            "synthesis", trace_payload, result, summarize_synthesis_stage
+        )
+        return result
 
+    @observe(
+        name="review_gate", as_type="chain", capture_input=False, capture_output=False
+    )
     @traceable(
         name="review_gate",
         run_type="chain",
@@ -433,12 +517,16 @@ class EvidenceCoordinator:
             auto_approve_min=thresholds.auto_approve_min_confidence,
             review_min=thresholds.review_min_confidence,
         )
-        return {
+        result = {
             "overall_confidence": overall_confidence,
             "decision": decision.value,
             "decision_enum": decision,
             "gate_reason": gate_reason,
         }
+        record_stage_observation(
+            "review_gate", trace_payload, result, summarize_review_gate
+        )
+        return result
 
     async def _run_live(
         self,

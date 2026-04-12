@@ -34,6 +34,9 @@ retrieval = [
 mcp = [
   "mcp>=1.0.0",
 ]
+observability = [
+  "langfuse>=4.0.0,<5",
+]
 
 [project.scripts]
 evidence-enrich = "evidence_enrichment.cli:app"

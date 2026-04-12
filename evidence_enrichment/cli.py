@@ -15,6 +15,7 @@ from evidence_enrichment.config.settings import get_settings
 from evidence_enrichment.context.resolver import ContextResolver
 from evidence_enrichment.core.enrichers.hq_country import HeadquartersCountryEnricher
 from evidence_enrichment.evals.harness import run_eval_harness
+from evidence_enrichment.observability.langfuse import flush_langfuse_traces
 from evidence_enrichment.observability.langsmith import flush_langsmith_traces
 from evidence_enrichment.pipeline.coordinator import EvidenceCoordinator
 
@@ -76,6 +77,7 @@ async def _run_pipeline(entity: dict, *, mode: str, replay_bundle: str | None = 
 
 def _flush_observability() -> None:
     flush_langsmith_traces()
+    flush_langfuse_traces()
 
 
 @app.command()

@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
+from evidence_enrichment.observability.langfuse import apply_langfuse_env
 from evidence_enrichment.observability.langsmith import apply_langsmith_env
 
 
@@ -106,13 +107,30 @@ class Settings(BaseModel):
         config = _load_yaml(Path(config_file))
         env_values = _parse_env_file(Path(env_file))
         data: dict[str, Any] = dict(config)
-        data["openai_api_key"] = os.getenv("OPENAI_API_KEY") or env_values.get("OPENAI_API_KEY")
-        data["openai_model"] = os.getenv("OPENAI_MODEL") or env_values.get("OPENAI_MODEL") or data.get("openai_model", "gpt-4.1-mini")
-        data["anthropic_api_key"] = os.getenv("ANTHROPIC_API_KEY") or env_values.get("ANTHROPIC_API_KEY")
-        data["anthropic_model"] = os.getenv("ANTHROPIC_MODEL") or env_values.get("ANTHROPIC_MODEL") or data.get("anthropic_model", "claude-3-5-sonnet-latest")
-        data["serper_api_key"] = os.getenv("SERPER_API_KEY") or env_values.get("SERPER_API_KEY")
-        data["tavily_api_key"] = os.getenv("TAVILY_API_KEY") or env_values.get("TAVILY_API_KEY")
+        data["openai_api_key"] = os.getenv("OPENAI_API_KEY") or env_values.get(
+            "OPENAI_API_KEY"
+        )
+        data["openai_model"] = (
+            os.getenv("OPENAI_MODEL")
+            or env_values.get("OPENAI_MODEL")
+            or data.get("openai_model", "gpt-4.1-mini")
+        )
+        data["anthropic_api_key"] = os.getenv("ANTHROPIC_API_KEY") or env_values.get(
+            "ANTHROPIC_API_KEY"
+        )
+        data["anthropic_model"] = (
+            os.getenv("ANTHROPIC_MODEL")
+            or env_values.get("ANTHROPIC_MODEL")
+            or data.get("anthropic_model", "claude-3-5-sonnet-latest")
+        )
+        data["serper_api_key"] = os.getenv("SERPER_API_KEY") or env_values.get(
+            "SERPER_API_KEY"
+        )
+        data["tavily_api_key"] = os.getenv("TAVILY_API_KEY") or env_values.get(
+            "TAVILY_API_KEY"
+        )
         apply_langsmith_env(env_values)
+        apply_langfuse_env(env_values)
         return cls(**data)
 
     @property
