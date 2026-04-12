@@ -203,7 +203,7 @@ class TestStageAnalysisAllFail:
         assert result.decision == ReviewDecision.AUTO_REJECT
         assert result.guardrails_report is not None
         assert not result.guardrails_report.passed
-        assert "hallucination" in result.gate_reason
+        assert result.gate_reason == result.guardrails_report.failure_summary()
 
     def test_rejected_documents_do_not_count_as_accepted(self):
         """Documents with accepted_for_analysis=False must not trigger the
