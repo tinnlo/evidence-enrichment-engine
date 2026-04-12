@@ -26,12 +26,12 @@ Each stage has a defined input contract, output contract, and trace span:
 | `parse` | Extracts field-relevant evidence fragments (structured mode: block-level HTML extraction) |
 | `evidence_assessment` | Scores source reliability and evidence agreement |
 | `retrieval_indexing` | *(optional)* Chunks accepted documents; embeds and upserts into Chroma |
-| `retrieval_query` | *(optional)* Retrieves top-k chunks per document via hybrid scoring |
+| `retrieval_query` | *(optional)* Retrieves top-k chunks per document via hybrid scoring; in `"agent"` mode, iterates via LangGraph |
 | `analysis` | Reasons over assessed evidence (uses retrieved chunks when available) |
 | `synthesis` | Produces a structured field value with confidence |
 | `review_gate` | Blocks low-confidence outputs; flags for human review |
 
-The two retrieval stages are active only when `retrieval.mode: local` is set in `evidence_enrichment.yaml`. When `mode: off` (default), the pipeline is unchanged.
+The two retrieval stages are active only when `retrieval.mode` is `"local"` or `"agent"` in `evidence_enrichment.yaml`. When `mode: "off"` (default), the pipeline is unchanged.
 
 ### Structured Context Pack
 
@@ -75,7 +75,7 @@ Every run writes trace artifacts to `examples/output/traces/<trace_id>/`:
 | `openinference_trace.json` | OpenInference-compatible compatibility export |
 | `resolved_context.json` | Context bundle snapshot for the run |
 
-Each span records: `trace_id`, `stage`, `provider`, `mode`, `latency_ms`, `input_count`, `output_count`, and `decision` where applicable.
+Each span records: `trace_id`, `stage`, `provider`, `mode`, `latency_ms`, `input_count`, `output_count`, `decision` where applicable, and `agent_iterations` for `retrieval_query` spans in `"agent"` mode.
 
 ### Retrieval-Augmented Analysis (Optional)
 
@@ -88,7 +88,15 @@ An optional RAG layer can be enabled to replace the default `text[:6000]` trunca
 - **Document-scoped retrieval:** Every query filters by `document_url`. Each document's evidence is retrieved independently, preserving per-document claim attribution through to `FactClaim.source_url`.
 - **Replay safety:** Retrieval is skipped entirely in replay mode. No embedding API calls, no Chroma initialisation, bundles unchanged.
 
-See [docs/retrieval.md](retrieval.md) for full architecture, config reference, and deferred v2 items.
+### LangGraph Adaptive Retrieval Agent (Optional)
+
+Setting `retrieval.mode: "agent"` wraps the `HybridRetriever` in a LangGraph `StateGraph` that iteratively retrieves, scores chunk quality, and refines the query when the average score is below a threshold — up to a configurable iteration cap (default 3).
+
+Graph topology: `retrieve → evaluate → branch(refine → retrieve loop | END)`
+
+The number of iterations used is recorded in `SpanRecord.agent_iterations` on the `retrieval_query` span and written to the local trace. This makes retrieval loop depth inspectable without any additional instrumentation.
+
+See [docs/retrieval.md](retrieval.md) for full architecture, config reference, state diagram, and deferred v2 items.
 
 ### LangSmith + Langfuse Integration (Opt-In)
 

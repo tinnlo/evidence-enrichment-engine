@@ -19,6 +19,8 @@ When LangSmith or Langfuse tracing is enabled, the coordinator also emits compac
 - `fetch`
 - `parse`
 - `evidence_assessment`
+- `retrieval_indexing` *(when `retrieval.mode` is `"local"` or `"agent"`)*
+- `retrieval_query` *(when `retrieval.mode` is `"local"` or `"agent"`)*
 - `analysis`
 - `synthesis`
 - `review_gate`
@@ -30,6 +32,8 @@ Both backends capture summarized inputs and outputs rather than raw full-documen
 - `fetch`: requested URLs, fetched count, success count
 - `parse`: document URLs, titles, and text-length summaries
 - `evidence_assessment`: acceptance decisions and score summaries
+- `retrieval_indexing`: document count indexed, total chunk count
+- `retrieval_query`: chunk count returned, top chunk score, `agent_iterations` (number of LangGraph retrieve→evaluate cycles; `null` in `"local"` mode)
 - `analysis`: accepted document URLs, claim count, candidate values
 - `synthesis`: selected value, supporting URLs, conflict count, synthesis confidence
 - `review_gate`: overall confidence, final decision, gate reason
