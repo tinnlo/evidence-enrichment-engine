@@ -8,7 +8,8 @@ from typer.testing import CliRunner
 from evidence_enrichment.cli import app
 from evidence_enrichment.core.enrichers.hq_country import HeadquartersCountryEnricher
 from evidence_enrichment.core.models.contracts import ParsedDocument
-from evidence_enrichment.core.models.enums import ProviderType
+from evidence_enrichment.core.models.enums import ProviderType, ReviewDecision
+from evidence_enrichment.guardrails.models import CheckResult, GuardrailsReport
 from evidence_enrichment.pipeline.coordinator import EvidenceCoordinator
 
 
@@ -163,6 +164,46 @@ class TestStageAnalysisAllFail:
             )
         assert len(reports) == 2  # one good report + one error placeholder
         assert claims == []  # good_report had no claims
+
+    def test_coordinator_short_circuits_on_guardrail_failure(self):
+        """Guardrails failure must override AUTO_APPROVE to AUTO_REJECT.
+
+        We run in replay mode (no live providers) so the gate would normally
+        return AUTO_APPROVE for the microsoft fixture.  We then patch
+        ``run_guardrails`` to return a failing report, proving that the
+        coordinator's decision is driven by guardrails and not the review gate.
+        """
+        _failing_report = GuardrailsReport(
+            pii=CheckResult(name="pii", passed=True),
+            hallucination=CheckResult(
+                name="hallucination",
+                passed=False,
+                reason="claim URL not in fetched document set",
+            ),
+            confidence=CheckResult(name="confidence", passed=True),
+            passed=False,
+        )
+
+        entity = {
+            "entity_id": "microsoft",
+            "name": "Microsoft Corporation",
+            "website": "https://www.microsoft.com",
+        }
+
+        with patch(
+            "evidence_enrichment.pipeline.coordinator.run_guardrails",
+            return_value=_failing_report,
+        ):
+            result = asyncio.run(
+                EvidenceCoordinator().run(
+                    entity, HeadquartersCountryEnricher(), mode="replay"
+                )
+            )
+
+        assert result.decision == ReviewDecision.AUTO_REJECT
+        assert result.guardrails_report is not None
+        assert not result.guardrails_report.passed
+        assert "hallucination" in result.gate_reason
 
     def test_rejected_documents_do_not_count_as_accepted(self):
         """Documents with accepted_for_analysis=False must not trigger the

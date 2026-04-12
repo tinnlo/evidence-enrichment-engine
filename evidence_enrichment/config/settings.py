@@ -43,6 +43,23 @@ class FieldThresholds(BaseModel):
     review_min_confidence: float = 0.50
 
 
+class GuardrailsSettings(BaseModel):
+    """Settings for post-synthesis guardrail checks."""
+
+    confidence_floor: float = 0.4
+    pii_entities: list[str] = Field(
+        default_factory=lambda: [
+            "EMAIL_ADDRESS",
+            "IBAN_CODE",
+            "UK_NHS",
+            "PHONE_NUMBER",
+            "CREDIT_CARD",
+            "CRYPTO",
+            "US_SSN",
+        ]
+    )
+
+
 class RetrievalConfig(BaseModel):
     """Configuration for the optional RAG retrieval pipeline.
 
@@ -90,6 +107,7 @@ class Settings(BaseModel):
     synthesis: StageProviderConfig = Field(default_factory=StageProviderConfig)
     thresholds: dict[str, FieldThresholds] = Field(default_factory=dict)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
+    guardrails: GuardrailsSettings = Field(default_factory=GuardrailsSettings)
     openai_api_key: str | None = None
     openai_model: str = "gpt-4.1-mini"
     anthropic_api_key: str | None = None
@@ -129,6 +147,18 @@ class Settings(BaseModel):
         data["tavily_api_key"] = os.getenv("TAVILY_API_KEY") or env_values.get(
             "TAVILY_API_KEY"
         )
+        # Guardrails: merge env override into existing YAML subtree so
+        # YAML-supplied pii_entities survive env injection.
+        floor_raw = os.getenv("GUARDRAILS_CONFIDENCE_FLOOR") or env_values.get(
+            "GUARDRAILS_CONFIDENCE_FLOOR"
+        )
+        if floor_raw is not None:
+            guardrails_subtree: dict[str, Any] = dict(data.get("guardrails") or {})
+            try:
+                guardrails_subtree["confidence_floor"] = float(floor_raw)
+            except ValueError:
+                pass
+            data["guardrails"] = guardrails_subtree
         apply_langsmith_env(env_values)
         apply_langfuse_env(env_values)
         return cls(**data)

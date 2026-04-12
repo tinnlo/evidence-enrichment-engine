@@ -90,9 +90,29 @@ An optional RAG layer can be enabled to replace the default `text[:6000]` trunca
 
 See [docs/retrieval.md](retrieval.md) for full architecture, config reference, and deferred v2 items.
 
-### LangSmith Integration (Opt-In)
+### LangSmith + Langfuse Integration (Opt-In)
 
-Set `LANGSMITH_TRACING=true` to enable LangSmith tracing alongside local artifacts. Stage-level spans are recorded without changing pipeline logic. See `docs/observability.md` for setup and dashboard flow.
+Set `LANGSMITH_TRACING=true` and/or provide `LANGFUSE_SECRET_KEY` / `LANGFUSE_PUBLIC_KEY` to enable dual-backend tracing alongside local artifacts. Stage-level spans are recorded without changing pipeline logic. See `docs/observability.md` for setup and dashboard flow.
+
+### Guardrails (Post-Synthesis Safety Checks)
+
+Three automated checks run after synthesis, before the result is returned, and can override the review gate's decision to `AUTO_REJECT`:
+
+| Check | What it does |
+|---|---|
+| **PII** | Scans synthesis text and each claim excerpt for personal data using presidio-analyzer (with regex fallback for email, IBAN, UK NIN when presidio is absent) |
+| **Hallucination** | Verifies that every claim's `source_url` resolves to a document actually fetched during the run — ungrounded citations flip the result to rejected |
+| **Confidence floor** | Rejects the run when `overall_confidence` is below a configurable threshold (default `0.4`, overridable via `GUARDRAILS_CONFIDENCE_FLOOR`) |
+
+Any check failure overrides the review gate's decision to `AUTO_REJECT` and sets `gate_reason` to a structured summary (e.g. `"guardrails failed: hallucination (2 ungrounded claims), confidence (0.31 < 0.40)"`). The full report is attached to `PipelineRunResult.guardrails_report`.
+
+Install optional presidio dependency with:
+
+```bash
+pip install 'evidence_enrichment[guardrails]'
+```
+
+Without presidio, PII detection falls back to deterministic regex patterns.
 
 ### Docker + CI
 

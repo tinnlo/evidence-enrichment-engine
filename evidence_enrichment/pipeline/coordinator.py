@@ -37,7 +37,8 @@ from evidence_enrichment.core.models.contracts import (
     SearchResult,
     SynthesisResult,
 )
-from evidence_enrichment.core.models.enums import SourceType
+from evidence_enrichment.core.models.enums import ReviewDecision, SourceType
+from evidence_enrichment.guardrails import run_guardrails
 from evidence_enrichment.core.parse.parser import TextParser
 from evidence_enrichment.core.providers.agents import (
     AnthropicAnalysisAgent,
@@ -995,6 +996,20 @@ class EvidenceCoordinator:
             span["output_count"] = 1
             span["decision"] = decision.value
             span["overall_confidence"] = overall_confidence
+
+            # --- Guardrails: run after review gate, still inside span ---
+            guardrails_report = run_guardrails(
+                synthesis=synthesis,
+                analysis_reports=reports,
+                parsed_documents=parsed_documents,
+                overall_confidence=overall_confidence,
+                floor=self.settings.guardrails.confidence_floor,
+                entities=self.settings.guardrails.pii_entities,
+            )
+            if not guardrails_report.passed:
+                decision = ReviewDecision.AUTO_REJECT
+                gate_reason = guardrails_report.failure_summary()
+                span["decision"] = decision.value
         sources = [
             EnrichmentSource(
                 source_type=SourceType.SEARCH,
@@ -1042,4 +1057,5 @@ class EvidenceCoordinator:
             gate_reason=gate_reason,
             output_value=synthesis.value,
             retrieval_degraded=self._retrieval_degraded,
+            guardrails_report=guardrails_report,
         )

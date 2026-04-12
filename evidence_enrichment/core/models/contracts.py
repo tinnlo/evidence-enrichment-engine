@@ -14,6 +14,7 @@ from evidence_enrichment.core.models.enums import (
     ReviewDecision,
     SourceType,
 )
+from evidence_enrichment.guardrails.models import GuardrailsReport
 
 
 def _clamp_01(v: float) -> float:
@@ -221,3 +222,4 @@ class PipelineRunResult(BaseModel):
     retrieval_top_scores: list[float] = Field(default_factory=list)
     fallback_from_live: bool = False
     retrieval_degraded: bool = False
+    guardrails_report: GuardrailsReport | None = None
