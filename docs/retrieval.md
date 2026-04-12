@@ -91,7 +91,7 @@ All retrieval settings live under the `retrieval` key in `evidence_enrichment.ya
 
 ```yaml
 retrieval:
-  mode: "off"               # "off" | "local"
+  mode: "off"               # "off" | "local" | "agent"
   persist_path: examples/output/chroma
   chunk_size: 1500
   overlap: 200
@@ -103,7 +103,7 @@ retrieval:
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `mode` | `"off"` disables retrieval entirely. `"local"` enables Chroma-backed RAG. | `"off"` |
+| `mode` | `"off"` disables retrieval entirely. `"local"` enables Chroma-backed RAG. `"agent"` wraps the retriever in a LangGraph adaptive agent. | `"off"` |
 | `persist_path` | Path for Chroma's persistent storage. Covered by `.gitignore`. | `examples/output/chroma` |
 | `chunk_size` | Target character count per text chunk. | `1500` |
 | `overlap` | Overlap in characters between consecutive text chunks. | `200` |
@@ -132,6 +132,43 @@ Run with retrieval active:
 
 ```bash
 evidence-enrich run --entity examples/microsoft.json --field hq_country --mode live
+```
+
+### Enabling Adaptive Agent Mode
+
+```yaml
+# evidence_enrichment.yaml
+retrieval:
+  mode: "agent"
+```
+
+In `"agent"` mode, retrieval is wrapped in a LangGraph `StateGraph` that
+iteratively retrieves, scores, and refines the query until the average
+chunk score exceeds a quality threshold (default 0.40) or the iteration
+cap (default 3) is reached.
+
+#### State diagram
+
+```
+         ┌──────────┐
+         │ retrieve │◄──────────────────┐
+         └────┬─────┘                   │
+              │                         │
+         ┌────▼──────┐   quality low    │
+         │ evaluate  ├──────────────►[refine]
+         └────┬──────┘
+              │ quality OK / cap hit
+              ▼
+            [END]
+```
+
+`agent_iterations` (the number of retrieve→evaluate cycles) is recorded in
+the `retrieval_query` span and written to the local trace file.
+
+Install the same `[retrieval]` extras group (LangGraph is included):
+
+```bash
+pip install -e ".[retrieval]"
 ```
 
 ---

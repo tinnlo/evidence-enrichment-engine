@@ -109,6 +109,8 @@ An optional RAG layer is available. When enabled (`retrieval.mode: local` in `ev
 4. Retrieves the top-k most relevant chunks per document using hybrid scoring (vector + keyword + table boost)
 5. Passes retrieved chunks to the analysis agent instead of the default `text[:6000]` truncation
 
+Setting `retrieval.mode: agent` wraps the retriever in a **LangGraph adaptive agent** (`StateGraph`) that iteratively retrieves, scores chunk quality, and refines the query until the average score exceeds a threshold — up to a configurable iteration cap.
+
 Retrieval is **document-scoped**: each query filters by `document_url` to preserve per-document claim attribution. Replay mode skips retrieval entirely — no embedding API calls, bundles unchanged.
 
 To enable:
@@ -116,7 +118,7 @@ To enable:
 ```yaml
 # evidence_enrichment.yaml
 retrieval:
-  mode: "local"
+  mode: "local"   # or "agent" for LangGraph adaptive retrieval
 ```
 
 Requires `OPENAI_API_KEY` and the `[retrieval]` dependency group:
@@ -125,7 +127,7 @@ Requires `OPENAI_API_KEY` and the `[retrieval]` dependency group:
 pip install -e ".[retrieval]"
 ```
 
-See [docs/retrieval.md](docs/retrieval.md) for the full architecture, chunking rationale, hybrid scoring formula, config reference, and deferred v2 items.
+See [docs/retrieval.md](docs/retrieval.md) for the full architecture, chunking rationale, hybrid scoring formula, config reference, and the LangGraph state diagram.
 
 **Privacy note:** Chroma storage (`examples/output/chroma/`) is covered by `.gitignore` and never committed.
 
@@ -295,9 +297,14 @@ docker compose run --rm pipeline evidence-enrich demo --mode auto
 
 ## Observability
 
-Every run still writes local trace artifacts under `examples/output/traces/<trace_id>/`. If you also enable LangSmith with `LANGSMITH_TRACING=true`, the pipeline records compact stage-level traces for query planning, search, fetch, parsing, evidence assessment, analysis, synthesis, and review gating without changing the pipeline logic. See [docs/observability.md](docs/observability.md) for env setup, stage payloads, and the LangSmith dashboard flow.
+Every run writes local trace artifacts under `examples/output/traces/<trace_id>/`. The pipeline supports two cloud observability integrations:
 
-**Privacy note:** When LangSmith tracing is enabled, the wrapped OpenAI and Anthropic clients also capture raw prompts and full LLM responses — which may include document text and retrieved chunks — in your LangSmith project. Avoid enabling LangSmith when processing sensitive documents.
+- **LangSmith** (`LANGSMITH_TRACING=true`): stage-level traces with compact payloads for all 8 pipeline stages.
+- **Langfuse** (`LANGFUSE_SECRET_KEY` + `LANGFUSE_PUBLIC_KEY`): spans decorated with `@observe` alongside LangSmith's `@traceable`; `flush_langfuse_traces()` is called at CLI exit.
+
+Both integrations are optional and independent — neither is required for the pipeline to run. See [docs/observability.md](docs/observability.md) for env setup, stage payloads, and dashboard flow.
+
+**Privacy note:** When cloud tracing is enabled, raw prompts and LLM responses — which may include document text and retrieved chunks — are sent to the respective tracing backend. Avoid enabling tracing when processing sensitive documents.
 
 ## Results Snapshot
 

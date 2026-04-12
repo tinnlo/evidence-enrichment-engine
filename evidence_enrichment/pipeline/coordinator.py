@@ -77,6 +77,7 @@ from evidence_enrichment.pipeline.replay import load_replay_bundle
 if TYPE_CHECKING:
     from evidence_enrichment.core.retrieval.models import RetrievalResult
     from evidence_enrichment.core.retrieval.retriever import HybridRetriever
+    from evidence_enrichment.core.retrieval.agent import RetrievalAgent
 
 
 class EvidenceCoordinator:
@@ -88,13 +89,15 @@ class EvidenceCoordinator:
         self.context_resolver = ContextResolver(
             self.settings.context_path / "context_manifest.yaml"
         )
-        self._retriever: "HybridRetriever | None" = None
+        self._retriever: "HybridRetriever | RetrievalAgent | None" = None
         self._retrieval_degraded: bool = False
 
-    def _get_retriever(self, entity_id: str) -> "HybridRetriever | None":
-        """Lazy-initialise the HybridRetriever when retrieval mode is active."""
+    def _get_retriever(
+        self, entity_id: str
+    ) -> "HybridRetriever | RetrievalAgent | None":
+        """Lazy-initialise the retriever when retrieval mode is active."""
         rc = self.settings.retrieval
-        if rc.mode != "local":
+        if rc.mode not in ("local", "agent"):
             return None
         if self._retriever is not None and self._retriever.entity_id == entity_id:
             return self._retriever
@@ -117,7 +120,7 @@ class EvidenceCoordinator:
                 overlap=rc.overlap,
                 max_table_size=rc.max_table_size,
             )
-            self._retriever = HybridRetriever(
+            hybrid = HybridRetriever(
                 entity_id=entity_id,
                 store=store,
                 embedder=embedder,
@@ -125,12 +128,18 @@ class EvidenceCoordinator:
                 top_k=rc.top_k,
                 weights=rc.weights,
             )
+            if rc.mode == "agent":
+                from evidence_enrichment.core.retrieval.agent import RetrievalAgent
+
+                self._retriever = RetrievalAgent(hybrid)
+            else:
+                self._retriever = hybrid
         except Exception as exc:
             logging.warning(
                 "Failed to initialise retriever for entity %s: %s", entity_id, exc
             )
             self._retriever = None
-            if rc.mode == "local":
+            if rc.mode in ("local", "agent"):
                 self._retrieval_degraded = True
         return self._retriever
 
@@ -654,6 +663,7 @@ class EvidenceCoordinator:
                 span["output_count"] = sum(
                     len(v) for v in retrieved_chunks_map.values()
                 )
+                span["agent_iterations"] = getattr(retriever, "last_iterations", None)
 
         accepted_documents = [
             document

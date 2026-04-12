@@ -27,6 +27,7 @@ class SpanRecord(BaseModel):
     overall_confidence: float | None = None
     chunk_count: int | None = None
     top_chunk_score: float | None = None
+    agent_iterations: int | None = None
 
 
 class TraceSummary(BaseModel):
@@ -73,7 +74,11 @@ class LocalTracer:
         input_count: int = 0,
     ) -> Iterator[dict]:
         started = time.perf_counter()
-        payload: dict = {"output_count": 0, "decision": None, "overall_confidence": None}
+        payload: dict = {
+            "output_count": 0,
+            "decision": None,
+            "overall_confidence": None,
+        }
         try:
             yield payload
         finally:
@@ -91,6 +96,7 @@ class LocalTracer:
                     output_count=int(payload.get("output_count", 0)),
                     decision=payload.get("decision"),
                     overall_confidence=payload.get("overall_confidence"),
+                    agent_iterations=payload.get("agent_iterations"),
                 )
             )
 
@@ -103,7 +109,8 @@ class LocalTracer:
         openinference_path = trace_dir / "openinference_trace.json"
 
         spans_path.write_text(
-            "\n".join(span.model_dump_json() for span in self.spans) + ("\n" if self.spans else ""),
+            "\n".join(span.model_dump_json() for span in self.spans)
+            + ("\n" if self.spans else ""),
             encoding="utf-8",
         )
 
@@ -138,7 +145,9 @@ class LocalTracer:
                 for span in self.spans
             ],
         }
-        openinference_path.write_text(json.dumps(openinference_payload, indent=2), encoding="utf-8")
+        openinference_path.write_text(
+            json.dumps(openinference_payload, indent=2), encoding="utf-8"
+        )
         return TraceArtifacts(
             trace_dir=trace_dir,
             spans_path=spans_path,
