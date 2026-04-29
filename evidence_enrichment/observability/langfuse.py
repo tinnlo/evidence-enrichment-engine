@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-from functools import lru_cache
 from typing import Any, Callable, Mapping
 
 # Re-export summarize_* helpers so both backends share them via __init__
@@ -22,6 +21,12 @@ from evidence_enrichment.observability.langsmith import (  # noqa: F401
     summarize_synthesis_stage,
     trace_payload_inputs,
 )
+from evidence_enrichment.observability.router import current_backend, get_active_backends
+from evidence_enrichment.observability.runtime import (
+    OBSERVABILITY_STATE_LOCK,
+    is_evicted_observability_value,
+    resolve_evicted_observability_value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,58 +38,149 @@ def _is_truthy(value: str | None) -> bool:
 
 
 def _pick_value(*values: str | None) -> str | None:
+    """Return the first non-empty value, skipping None and empty strings.
+
+    This ensures an empty ambient env var (``LANGFUSE_SECRET_KEY=""``) does not
+    shadow a valid value supplied via a .env file or explicit argument.
+    """
     for value in values:
-        if value is not None:
+        if value:  # skips None and ""
             return value
     return None
 
 
-def apply_langfuse_env(env_values: Mapping[str, str] | None = None) -> bool:
-    """Set LANGFUSE_* env vars from env_values / os.environ.
+def _mapping_value(mapping: Mapping[str, str | None], key: str) -> str | None:
+    value = mapping.get(key)
+    return value if value else None
 
-    Mirrors apply_langsmith_env.  Returns True when secret key is present.
+
+def apply_langfuse_env(
+    env_values: Mapping[str, str] | None = None,
+    *,
+    ambient_env: Mapping[str, str | None] | None = None,
+    clear_missing: bool = False,
+) -> bool:
+    """Set LANGFUSE_* env vars from env_values / ambient_env.
+
+    Args:
+        env_values: Repo-local .env values or explicit overrides.
+        ambient_env: Source of external process env overrides. Defaults to
+            ``os.environ``. ``Settings.load()`` passes a pre-mutation snapshot so
+            repeated loads do not accidentally reuse stale managed values.
+        clear_missing: When True, remove any LANGFUSE_* vars that are absent from
+            both sources instead of leaving old process env values in place.
+
+    Returns True when a secret key is present after synchronisation.
     Accepts legacy LANGFUSE_HOST for back-compat alongside LANGFUSE_BASE_URL.
     """
-    env_values = env_values or {}
-    secret_key = _pick_value(
-        os.getenv("LANGFUSE_SECRET_KEY"),
-        env_values.get("LANGFUSE_SECRET_KEY"),
-    )
-    public_key = _pick_value(
-        os.getenv("LANGFUSE_PUBLIC_KEY"),
-        env_values.get("LANGFUSE_PUBLIC_KEY"),
-    )
-    base_url = _pick_value(
-        os.getenv("LANGFUSE_BASE_URL"),
-        env_values.get("LANGFUSE_BASE_URL"),
-        # Legacy alias — accept LANGFUSE_HOST for back-compat
-        os.getenv("LANGFUSE_HOST"),
-        env_values.get("LANGFUSE_HOST"),
-    )
+    with OBSERVABILITY_STATE_LOCK:
+        env_values = env_values or {}
+        ambient_env = os.environ if ambient_env is None else ambient_env
+        secret_key = _pick_value(
+            resolve_evicted_observability_value(
+                "LANGFUSE_SECRET_KEY",
+                _mapping_value(ambient_env, "LANGFUSE_SECRET_KEY"),
+            ),
+            resolve_evicted_observability_value(
+                "LANGFUSE_SECRET_KEY",
+                env_values.get("LANGFUSE_SECRET_KEY"),
+            ),
+        )
+        public_key = _pick_value(
+            resolve_evicted_observability_value(
+                "LANGFUSE_PUBLIC_KEY",
+                _mapping_value(ambient_env, "LANGFUSE_PUBLIC_KEY"),
+            ),
+            resolve_evicted_observability_value(
+                "LANGFUSE_PUBLIC_KEY",
+                env_values.get("LANGFUSE_PUBLIC_KEY"),
+            ),
+        )
+        base_url = _pick_value(
+            _mapping_value(ambient_env, "LANGFUSE_BASE_URL"),
+            env_values.get("LANGFUSE_BASE_URL"),
+            # Legacy alias — accept LANGFUSE_HOST for back-compat
+            _mapping_value(ambient_env, "LANGFUSE_HOST"),
+            env_values.get("LANGFUSE_HOST"),
+        )
 
-    if secret_key:
-        os.environ["LANGFUSE_SECRET_KEY"] = secret_key
-    if public_key:
-        os.environ["LANGFUSE_PUBLIC_KEY"] = public_key
-    if base_url:
-        # Keep both LANGFUSE_BASE_URL and legacy LANGFUSE_HOST in sync
-        os.environ["LANGFUSE_BASE_URL"] = base_url
-        os.environ["LANGFUSE_HOST"] = base_url
+        if secret_key:
+            os.environ["LANGFUSE_SECRET_KEY"] = secret_key
+        elif is_evicted_observability_value(
+            "LANGFUSE_SECRET_KEY",
+            os.getenv("LANGFUSE_SECRET_KEY"),
+        ):
+            os.environ.pop("LANGFUSE_SECRET_KEY", None)
+        elif clear_missing:
+            os.environ.pop("LANGFUSE_SECRET_KEY", None)
 
-    return bool(os.getenv("LANGFUSE_SECRET_KEY"))
+        if public_key:
+            os.environ["LANGFUSE_PUBLIC_KEY"] = public_key
+        elif is_evicted_observability_value(
+            "LANGFUSE_PUBLIC_KEY",
+            os.getenv("LANGFUSE_PUBLIC_KEY"),
+        ):
+            os.environ.pop("LANGFUSE_PUBLIC_KEY", None)
+        elif clear_missing:
+            os.environ.pop("LANGFUSE_PUBLIC_KEY", None)
+
+        if base_url:
+            # Keep both LANGFUSE_BASE_URL and legacy LANGFUSE_HOST in sync
+            os.environ["LANGFUSE_BASE_URL"] = base_url
+            os.environ["LANGFUSE_HOST"] = base_url
+        elif clear_missing:
+            os.environ.pop("LANGFUSE_BASE_URL", None)
+            os.environ.pop("LANGFUSE_HOST", None)
+
+        fully_configured = bool(
+            os.getenv("LANGFUSE_SECRET_KEY") and os.getenv("LANGFUSE_PUBLIC_KEY")
+        )
+        if not fully_configured:
+            present = [
+                k
+                for k in ("LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY")
+                if os.getenv(k)
+            ]
+            missing = [
+                k
+                for k in ("LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY")
+                if not os.getenv(k)
+            ]
+            if present:
+                # Partial config — warn once; backend stays inactive to avoid silent
+                # activation with incomplete credentials.
+                logger.warning(
+                    "Langfuse partially configured: %s present but %s missing. "
+                    "Langfuse will remain inactive until all required credentials are set.",
+                    ", ".join(present),
+                    ", ".join(missing),
+                )
+        return fully_configured
 
 
-@lru_cache(maxsize=1)
 def get_langfuse_client():
-    """Return the v4 Langfuse client, or None when disabled/unavailable."""
-    if not apply_langfuse_env():
-        return None
-    try:
-        from langfuse import get_client  # type: ignore[import-untyped]
+    """Return the v4 Langfuse client, or None when disabled/unavailable.
 
-        return get_client()
-    except Exception:
+    Not cached — Settings.load() may clear LANGFUSE_* keys after the first
+    call when the backend selector changes, so we must re-check on every call.
+
+    Also respects ``OBSERVABILITY_BACKEND``: if the backend is set to a value
+    that does not include Langfuse (e.g. ``langsmith`` or ``none``), returns
+    ``None`` even when ``LANGFUSE_SECRET_KEY`` is present in the environment.
+    """
+    langfuse_active, _ = get_active_backends(current_backend())
+    if not langfuse_active:
         return None
+
+    with OBSERVABILITY_STATE_LOCK:
+        if not apply_langfuse_env():
+            return None
+        try:
+            from langfuse import get_client  # type: ignore[import-untyped]
+
+            return get_client()
+        except Exception:
+            return None
 
 
 def flush_langfuse_traces() -> None:
@@ -115,9 +211,11 @@ def record_stage_observation(
     if client is None:
         return
     try:
+        from evidence_enrichment.observability.langsmith import _maybe_redact
+
         output_summary = summarizer(outputs)
         client.update_current_span(  # type: ignore[attr-defined]
-            input=trace_payload,
+            input=_maybe_redact(trace_payload),
             output=output_summary,
         )
     except Exception as exc:

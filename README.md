@@ -1,264 +1,190 @@
 # Evidence Enrichment Engine
 
-`evidence-enrichment-engine` is a narrow public demo for context engineering, replay-backed evaluation, and local agent observability around one evidence-backed enrichment workflow.
+`evidence_enrichment` is a public-safe reconstruction of a production evidence-backed enrichment workflow. The repo is intentionally narrow: one entity fixture, one target field, one coordinator, one replay-first contract, and one inspectable decision path.
 
-This public demo rebuilds a production architectural pattern in a public-safe form. It preserves system design, module boundaries, and execution flow while removing proprietary business logic and internal data.
+## Why This Repo Is Worth Reviewing
 
-## Why This Repo Exists
+| Signal | Why it matters to a technical reviewer |
+|---|---|
+| Replay-first contract | The default demo path is deterministic, zero-network, and regression-friendly. |
+| Context pack as runtime data | Stage-scoped instructions live in files, resolve into `resolved_context.json`, and stay inspectable after every run. |
+| Explicit evidence pipeline | Query planning, search, fetch, parse, assessment, analysis, synthesis, and review are separate stages with local traces. |
+| Optional LangGraph retrieval path | Retrieval can stay off, run as local RAG, or run as a stateful retrieve-evaluate-refine loop without changing the base artifact contract. |
+| Langfuse-first observability | `OBSERVABILITY_BACKEND` routes traces to Langfuse, LangSmith, both, or neither while local artifacts remain on by default. |
+| MCP surface | MCP-compatible clients can invoke the replay-safe workflow without inventing a second integration layer. |
 
-- What this demo shows: how to structure agent context, inspect agent workflow stages, and evaluate replay-backed behavior against expected outcomes.
-- Which production capability it mirrors: a search-grounded enrichment flow that resolves one structured field from public evidence instead of prompting directly from raw entity inputs.
-- What was intentionally generalized or removed: proprietary business rules, internal datasets, internal URLs, organization-specific runbooks, and production infrastructure assumptions.
-- Why it exists in the portfolio: to show disciplined workflow design and instrumentation without pretending this repo is a broad agent platform.
+## Architecture At A Glance
 
-The repo stays intentionally narrow:
+```mermaid
+graph TD
 
-- one entity anchor: `Microsoft Corporation`
-- one field: `hq_country`
-- one coordinator
-- one replay-safe pipeline
+subgraph INPUTS["Inputs and controls"]
+  direction TB
+  E["Entity fixture or MCP request"]:::bronze
+  C["Context pack"]:::external
+  M["Run mode + settings"]:::external
+end
 
-## Context Engineering
+subgraph PIPE["Evidence pipeline"]
+  direction TB
+  QP["Query plan"]:::bronze
+  S["Search"]:::silver
+  F["Fetch"]:::silver
+  P["Parse"]:::silver
+  EA["Evidence assessment"]:::silver
+  RI["Retrieval indexing<br/>(optional)"]:::silver
+  RQ["Retrieval query<br/>(optional)"]:::silver
+  A["Analysis"]:::golden
+  SY["Synthesis"]:::golden
+  RG["Review gate"]:::golden
+end
 
-The `context/` directory defines the context pack used by the workflow:
+subgraph OUTPUTS["Artifacts and integrations"]
+  direction TB
+  O1["Pipeline result"]:::artifact
+  O2["Local trace artifacts<br/>spans.jsonl | trace_summary.json<br/>trace_timeline.md | openinference_trace.json<br/>resolved_context.json"]:::artifact
+  O3["Optional remote traces<br/>Langfuse | LangSmith"]:::external
+  O4["Replay evals + MCP clients"]:::external
+end
 
-- `system_role.md`
-- `task_spec.md`
-- `data_contracts.md`
-- `failure_modes.md`
-- `decision_rubric.md`
-- `context_manifest.yaml`
+E --> QP
+C -. "stage-scoped rules" .-> QP
+C -. "analysis context" .-> A
+C -. "decision rubric" .-> RG
+M -. "replay | auto | live" .-> S
+QP --> S --> F --> P --> EA
+EA -. "default path" .-> A
+EA --> RI --> RQ --> A
+A --> SY --> RG
+RG --> O1
+RG --> O2
+RG -. "backend router" .-> O3
+O1 --> O4
 
-`context_manifest.yaml` controls:
+classDef bronze fill:#ffe6e6,stroke:#b30000,stroke-width:1px
+classDef silver fill:#e6f0ff,stroke:#003399,stroke-width:1px
+classDef golden fill:#e6ffe6,stroke:#006400,stroke-width:1px
+classDef external fill:#fce8ff,stroke:#7b2fa8,stroke-width:1.5px,stroke-dasharray:5 3
+classDef artifact fill:#fff8e1,stroke:#e65100,stroke-width:1px,stroke-dasharray:5 5
 
-- load order
-- per-stage context usage
-- priority labels
-- max character budgets
-
-Each run resolves the manifest into a `resolved_context.json` artifact so the workflow shows exactly what context bundle was available to each stage.
-
-## Eval Harness
-
-The repo includes a replay eval harness under `evals/`:
-
-- `cases.yaml` defines replay-backed cases for the same entity under different evidence conditions
-- `run_eval.py` runs the harness
-- `report_schema.json` documents the report shape
-- `output/latest_report.json` stores the latest report
-
-The eval surface is intentionally small. It checks whether the workflow returns the expected value, expected decision, and minimum confidence threshold for a fixed task.
-
-## Observability
-
-The coordinator emits local trace artifacts for these spans:
-
-- `query_plan`
-- `search`
-- `fetch`
-- `parse`
-- `evidence_assessment`
-- `retrieval_indexing` *(optional)*
-- `retrieval_query` *(optional)*
-- `analysis`
-- `synthesis`
-- `review_gate`
-
-Every span records:
-
-- `trace_id`
-- `stage`
-- `provider`
-- `mode`
-- `latency_ms`
-- `entity_id`
-- `field`
-- `input_count`
-- `output_count`
-- `decision` where relevant
-
-Artifacts are written to `examples/output/traces/<trace_id>/`:
-
-- `spans.jsonl`
-- `trace_summary.json`
-- `trace_timeline.md`
-- `openinference_trace.json`
-- `resolved_context.json`
-
-The OpenInference-style JSON is a compatibility export, not a claim of deployed production telemetry infrastructure.
-
-## Architecture
-
-```text
-context pack
-    ->
-coordinator
-    ->
-query_plan -> search -> fetch -> parse -> evidence_assessment -> analysis -> synthesis -> review_gate
-    ->
-result artifact + resolved_context.json + trace artifacts + eval report
+style INPUTS fill:transparent,stroke:#7b2fa8,stroke-width:1px,stroke-dasharray:4 4
+style PIPE fill:transparent,stroke:#003399,stroke-width:1px,stroke-dasharray:4 4
+style OUTPUTS fill:transparent,stroke:#e65100,stroke-width:1px,stroke-dasharray:4 4
 ```
 
-## Retrieval-Augmented Analysis (Optional)
+Deep dives:
 
-An optional RAG layer is available. When enabled (`retrieval.mode: local` in `evidence_enrichment.yaml`), the pipeline:
+- [Goals and features](docs/goals_and_features.md)
+- [Retrieval architecture](docs/retrieval.md)
+- [Observability model](docs/observability.md)
 
-1. Uses `parse_with_structure` to extract block-level HTML content (headings, tables, text paragraphs)
-2. Chunks accepted documents with a table-aware chunker (tables kept atomic up to `max_table_size`; larger tables split on whitespace boundaries; character-based overlap for text)
-3. Embeds chunks via OpenAI `text-embedding-3-small` and stores them in a local Chroma vector store
-4. Retrieves the top-k most relevant chunks per document using hybrid scoring (vector + keyword + table boost)
-5. Passes retrieved chunks to the analysis agent instead of the default `text[:6000]` truncation
-
-Setting `retrieval.mode: agent` wraps the retriever in a **LangGraph adaptive agent** (`StateGraph`) that iteratively retrieves, scores chunk quality, and refines the query until the average score exceeds a threshold — up to a configurable iteration cap.
-
-Retrieval is **document-scoped**: each query filters by `document_url` to preserve per-document claim attribution. Replay mode skips retrieval entirely — no embedding API calls, bundles unchanged.
-
-To enable:
-
-```yaml
-# evidence_enrichment.yaml
-retrieval:
-  mode: "local"   # or "agent" for LangGraph adaptive retrieval
-```
-
-Requires `OPENAI_API_KEY` and the `[retrieval]` dependency group:
+## Quick Start
 
 ```bash
-pip install -e ".[retrieval]"
-```
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install -e ".[dev]"
 
-See [docs/retrieval.md](docs/retrieval.md) for the full architecture, chunking rationale, hybrid scoring formula, config reference, and the LangGraph state diagram.
-
-**Privacy note:** Chroma storage (`examples/output/chroma/`) is covered by `.gitignore` and never committed.
-
-## Replay-First Flow
-
-The default run mode is `auto`: the pipeline attempts to run live when provider credentials are present.  If credentials are missing **and** a replay bundle exists for the entity, it falls back to replay automatically.  If no replay bundle is found, the pipeline proceeds live and will error if credentials are also absent.  To force replay mode unconditionally (no network access, no credentials required), pass `--mode replay`.
-
-```bash
-pip install -e ".[dev]"
-```
-
-Run the core demo:
-
-```bash
 evidence-enrich demo --mode replay
-```
-
-Resolve the context pack without running the pipeline:
-
-```bash
-evidence-enrich context-pack
-```
-
-Run the trace-focused demo:
-
-```bash
-evidence-enrich trace-demo --mode replay
-```
-
-Run the comparison artifact:
-
-```bash
-evidence-enrich compare
-```
-
-Run the eval harness:
-
-```bash
 evidence-enrich eval
 ```
 
-Run directly on the entity fixture:
+Optional extras:
+
+| Need | Install |
+|---|---|
+| Live providers | `python -m pip install -e ".[live]"` |
+| Retrieval and LangGraph | `python -m pip install -e ".[retrieval]"` |
+| Langfuse remote tracing | `python -m pip install -e ".[observability]"` |
+| MCP server | `python -m pip install -e ".[mcp]"` |
+| Guardrails extras | `python -m pip install -e ".[guardrails]"` |
+
+## Execution Modes
+
+### Pipeline mode
+
+| Mode | What it does | Typical use |
+|---|---|---|
+| `replay` | Forces replay bundles; no provider API keys or network access required | Default demo and regression work |
+| `auto` | Tries live providers when credentials are present, otherwise falls back to replay when a bundle exists | Developer convenience |
+| `live` | Forces live provider calls | Manual end-to-end validation |
+
+### Retrieval mode
+
+| `retrieval.mode` | Behavior |
+|---|---|
+| `off` | Default path. `analysis` uses the parsed document text directly. |
+| `local` | Accepted documents are chunked, embedded into Chroma, and queried before `analysis`. |
+| `agent` | Wraps retrieval in a LangGraph stateful loop that can retrieve, evaluate, and refine before returning chunks to `analysis`. |
+
+Replay mode skips retrieval entirely even if retrieval is configured. That preserves the zero-network default demo path and keeps replay bundles unchanged.
+
+## Observability
+
+Every run always writes local trace artifacts under `examples/output/traces/<trace_id>/`.
+
+Remote backend selection is controlled by one env var:
 
 ```bash
-evidence-enrich run --entity examples/microsoft.json --field hq_country --mode replay
+OBSERVABILITY_BACKEND=langfuse   # default
+OBSERVABILITY_BACKEND=langsmith
+OBSERVABILITY_BACKEND=dual
+OBSERVABILITY_BACKEND=none
 ```
+
+Observability behavior:
+
+- Langfuse is the default and primary remote path.
+- LangSmith remains fully supported as an alternative backend.
+- Missing remote credentials never crash the pipeline; the run falls back to local-artifact-only tracing.
+- `TRACE_REDACT_VALUES=true` is the default, so sensitive values are redacted before remote emission.
+
+Privacy note:
+
+- Langfuse uses `capture_input=False` and `capture_output=False`, so it receives compact stage summaries rather than automatic full prompt/response capture.
+- Raw prompts and LLM responses are only sent remotely when LangSmith is active and `TRACE_REDACT_VALUES=false`.
+- With the default `TRACE_REDACT_VALUES=true`, LangSmith client wrapping is disabled and sensitive summary fields are redacted before leaving the process.
+
+See [docs/observability.md](docs/observability.md) for backend setup, redaction rules, credential eviction, and process-global caveats.
+
+## Retrieval And LangGraph
+
+The retrieval layer is optional and deliberately scoped. It exists to show a stateful evidence-selection pattern without changing the public artifact contract.
+
+- `local` mode adds `retrieval_indexing` and `retrieval_query` stages between `evidence_assessment` and `analysis`.
+- `agent` mode uses a LangGraph `StateGraph` for retrieve-evaluate-refine iteration and records `agent_iterations` in the `retrieval_query` span.
+- Retrieval is document-scoped, so each `FactClaim.source_url` stays attributable to the document that produced it.
+
+See [docs/retrieval.md](docs/retrieval.md) for chunking, scoring, config, and the LangGraph loop.
 
 ## MCP Server
 
-The engine exposes an MCP (Model Context Protocol) server so any MCP-compatible AI agent can call into the pipeline directly — no UI required.
-
-### Install
+The repo exposes an MCP server so MCP-compatible clients can invoke the workflow directly.
 
 ```bash
-pip install -e ".[mcp]"
-```
+python -m pip install -e ".[mcp]"
 
-### Run
-
-```bash
-# stdio transport (default) — for Claude Desktop and OpenCode
 evidence-enrich mcp
-
-# HTTP transport — for MCP Inspector or browser clients
 evidence-enrich mcp --transport streamable-http
-# MCP Inspector URL: http://localhost:8000/mcp
 
-# Dedicated entrypoint (same as above)
 evidence-enrich-mcp
 evidence-enrich-mcp --transport streamable-http
 ```
 
-The dedicated `evidence-enrich-mcp` entrypoint requires the `[mcp]` extra. In a base install without that extra, it exits with installation guidance instead of raising a traceback.
+MCP defaults to replay mode, so the server works without provider credentials.
 
-All tools default to `replay` mode and require no API keys.
+## Results Snapshot
 
-### Connect
+| Path | Expected outcome | Decision | Confidence |
+|---|---|---|---|
+| Baseline replay | `USA` from weak secondary evidence | `needs_review` | `0.75` |
+| Assessed replay | `USA` from agreeing primary sources | `auto_approve` | `0.97` |
+| Eval harness | replay cases pass against expectations | `6/6 pass` | case-dependent |
 
-**Claude Desktop** — add to `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "evidence-enrichment": {
-      "command": "evidence-enrich-mcp"
-    }
-  }
-}
-```
-
-**OpenCode** — add to `.opencode/config.json`:
-
-```json
-{
-  "mcp": {
-    "evidence-enrichment": {
-      "type": "local",
-      "command": ["evidence-enrich-mcp"]
-    }
-  }
-}
-```
-
-**MCP Inspector** — run with `--transport streamable-http` and point the Inspector at `http://localhost:8000/mcp`.
-
-### Resources (read-only)
-
-| URI | Description |
-| --- | --- |
-| `evidence://bundles` | JSON list of all 6 replay bundle names and descriptions |
-| `evidence://bundles/{name}` | Raw JSON of a named replay bundle |
-| `evidence://results/latest` | Newest pipeline result artifact by modification time from a CLI run |
-
-### Tools (actions)
-
-| Tool | Description |
-| --- | --- |
-| `list_replay_scenarios` | List all replay bundles with descriptions |
-| `run_enrichment_pipeline` | Run the full 8-stage pipeline; returns complete `PipelineRunResult` |
-| `get_synthesis_result` | Run the pipeline; returns a concise `SynthesisSummary` (value, decision, confidence) |
-| `get_evidence_claims` | Run the pipeline; returns all extracted `FactClaim` objects |
-| `compare_scenarios` | Run two bundles concurrently and return a side-by-side `ScenarioComparison` |
-
-### Prompt
-
-`analyze_entity(entity_name, field_name, scenario)` — guides an agent through interpreting pipeline output, evaluating claim quality, and explaining the review decision.
-
-### Replay Scenarios
+Replay bundles included in the repo:
 
 | Bundle name | Expected decision | Notes |
-| --- | --- | --- |
+|---|---|---|
 | `microsoft_hq_country` | `auto_approve` | Two agreeing high-authority sources |
 | `microsoft_hq_country_baseline` | `needs_review` | Weak secondary evidence only |
 | `microsoft_hq_country_conflict` | `needs_review` | Conflicting claims across sources |
@@ -266,75 +192,48 @@ All tools default to `replay` mode and require no API keys.
 | `microsoft_hq_country_invalid_iso3` | `auto_reject` | Non-ISO3 synthesis output |
 | `microsoft_hq_country_low_signal` | `needs_review` | Single low-confidence claim |
 
----
-
-## Quick Start with Docker
-
-The default container path runs the replay demo, so you can keep provider keys blank unless you want live mode or LangSmith tracing.
+## Docker
 
 ```bash
 cp .env.example .env
 docker compose up
 ```
 
-Run tests in the same image:
+Useful container commands:
 
 ```bash
 docker compose run --rm pipeline pytest tests/
-```
-
-Run the eval harness in the container:
-
-```bash
 docker compose run --rm pipeline evidence-enrich eval
-```
-
-If you want live providers instead of replay, fill in the relevant keys in `.env` and override the command:
-
-```bash
 docker compose run --rm pipeline evidence-enrich demo --mode auto
 ```
 
-## Observability
+## CI And Development
 
-Every run writes local trace artifacts under `examples/output/traces/<trace_id>/`. The pipeline supports two cloud observability integrations:
+GitHub Actions CI lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) and currently:
 
-- **LangSmith** (`LANGSMITH_TRACING=true`): stage-level traces with compact payloads for all 8 pipeline stages.
-- **Langfuse** (`LANGFUSE_SECRET_KEY` + `LANGFUSE_PUBLIC_KEY`): spans decorated with `@observe` alongside LangSmith's `@traceable`; `flush_langfuse_traces()` is called at CLI exit.
+1. installs `.[dev]`
+2. runs `pytest tests/`
+3. runs `ruff check .`
 
-Both integrations are optional and independent — neither is required for the pipeline to run. See [docs/observability.md](docs/observability.md) for env setup, stage payloads, and dashboard flow.
+Equivalent local commands:
 
-**Privacy note:** When cloud tracing is enabled, raw prompts and LLM responses — which may include document text and retrieved chunks — are sent to the respective tracing backend. Avoid enabling tracing when processing sensitive documents.
-
-## Results Snapshot
-
-| Path | Expected Outcome | Decision | Confidence |
-| --- | --- | --- | --- |
-| Baseline replay | `USA` from weak secondary evidence | `needs_review` | `0.75` |
-| Assessed replay | `USA` from agreeing primary sources | `auto_approve` | `0.97` |
-| Eval harness | replay cases pass against expectations | `6/6 pass` | case-dependent |
+```bash
+pytest tests/
+evidence-enrich eval
+ruff check .
+```
 
 ## Repo Layout
 
 ```text
 context/
+docs/
 evals/
-examples/replay/
-examples/output/
+examples/
 evidence_enrichment/
 tests/
 ```
 
 ## Honesty Note
 
-This is a public-safe demo of patterns used to structure and inspect agentic workflows. It is deliberately small, local, and replay-driven. It is not presented as a full production observability stack or a general-purpose agent framework.
-
-## Development
-
-```bash
-pytest
-python evals/run_eval.py
-ruff check .
-```
-
-The test suite also checks that the repository stays free of banned internal identifiers and company-specific references.
+This is a public-safe demo of patterns used to structure and inspect agentic workflows. It is deliberately small, local, and replay-driven. It is not presented as a full production observability stack or a general-purpose agent platform.

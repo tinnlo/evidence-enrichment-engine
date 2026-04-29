@@ -1,135 +1,134 @@
-# Goals and Features — Evidence Enrichment Engine
+# Goals And Features
+
+`evidence_enrichment` exists to demonstrate a disciplined evidence-backed enrichment pattern rather than a generic agent shell. The interesting part is not that an LLM is called. The interesting part is the contract around that call: explicit context, staged evidence handling, replay-safe evaluation, inspectable traces, and a review gate that can refuse weak outputs.
 
 ## Goal
 
-Demonstrate disciplined context engineering, replay-backed evaluation, and local agent observability for a structured field enrichment workflow.
+Show how to resolve one structured field from public evidence through a replay-first pipeline with inspectable decisions, optional stateful retrieval, and privacy-aware observability.
 
-The repo shows how to resolve a structured fact from public evidence through a staged pipeline — rather than prompting an LLM directly from raw entity inputs. Every design decision (context scoping, stage boundaries, replay safety, confidence gating) is made explicit and inspectable.
+## Review Signals
 
-## What This Solves
-
-Naive LLM enrichment is brittle: prompts are opaque, results are unrepeatable, and failures are hard to diagnose. This repo shows the architectural layer that makes enrichment workflows reliable: structured context packs, stage-level tracing, replay-backed evaluation, and explicit review gates that block low-confidence outputs from passing through.
-
----
-
-## Features
-
-### 8-Stage Pipeline (10-Stage with Retrieval)
-
-Each stage has a defined input contract, output contract, and trace span:
-
-| Stage | Role |
+| Signal | What is implemented |
 |---|---|
-| `query_plan` | Generates search queries scoped to the target field |
-| `search` | Executes queries via configured providers |
-| `fetch` | Retrieves and normalises page content |
-| `parse` | Extracts field-relevant evidence fragments (structured mode: block-level HTML extraction) |
-| `evidence_assessment` | Scores source reliability and evidence agreement |
-| `retrieval_indexing` | *(optional)* Chunks accepted documents; embeds and upserts into Chroma |
-| `retrieval_query` | *(optional)* Retrieves top-k chunks per document via hybrid scoring; in `"agent"` mode, iterates via LangGraph |
-| `analysis` | Reasons over assessed evidence (uses retrieved chunks when available) |
-| `synthesis` | Produces a structured field value with confidence |
-| `review_gate` | Blocks low-confidence outputs; flags for human review |
+| Context engineering | Stage-scoped context files live under `context/` and resolve into `resolved_context.json` on every run. |
+| Evidence-first execution | The pipeline separates query planning, acquisition, parsing, evidence assessment, reasoning, synthesis, and review. |
+| Replay-backed regression surface | The demo ships replay bundles and an eval harness so behavior can be checked without live providers. |
+| LangGraph as a real path | Retrieval can run as an actual `StateGraph` loop rather than a roadmap claim. |
+| Langfuse-first observability | `OBSERVABILITY_BACKEND=langfuse` is the documented default, with `langsmith`, `dual`, and `none` still supported. |
+| Safe public framing | The repo preserves architecture and execution flow while removing proprietary inputs and internal infrastructure claims. |
 
-The two retrieval stages are active only when `retrieval.mode` is `"local"` or `"agent"` in `evidence_enrichment.yaml`. When `mode: "off"` (default), the pipeline is unchanged.
+## System View
 
-### Structured Context Pack
+```mermaid
+graph TD
 
-The `context/` directory defines the full context bundle used by the workflow:
+subgraph INPUTS["Inputs and controls"]
+  direction TB
+  E["Entity fixture"]:::bronze
+  C["Context pack"]:::external
+  R["Replay bundles"]:::external
+  S["Settings + env"]:::external
+end
 
-| File | Purpose |
-|---|---|
-| `system_role.md` | Agent role definition |
-| `task_spec.md` | Field-level task specification |
-| `data_contracts.md` | Input/output schemas |
-| `failure_modes.md` | Known failure patterns and handling rules |
-| `decision_rubric.md` | Confidence band definitions and decision criteria |
-| `context_manifest.yaml` | Load order, per-stage scoping, priority labels, character budgets |
+subgraph PIPE["Pipeline and optional extensions"]
+  direction TB
+  QP["Query plan"]:::bronze
+  SE["Search"]:::silver
+  FE["Fetch"]:::silver
+  PA["Parse"]:::silver
+  EA["Evidence assessment"]:::silver
+  RI["Retrieval indexing<br/>(optional)"]:::silver
+  RQ["Retrieval query<br/>(optional)"]:::silver
+  AN["Analysis"]:::golden
+  SY["Synthesis"]:::golden
+  RG["Review gate"]:::golden
+end
 
-Every run resolves the manifest into a `resolved_context.json` artifact — the exact context available to each stage is preserved with the run outputs.
+subgraph OUTPUTS["Artifacts and integrations"]
+  direction TB
+  O1["Run result"]:::artifact
+  O2["Local traces + resolved context"]:::artifact
+  O3["Optional remote traces"]:::external
+  O4["Eval report + MCP consumers"]:::external
+end
 
-### Replay-First Execution
+E --> QP
+C -. "task rules" .-> QP
+C -. "analysis context" .-> AN
+C -. "review rubric" .-> RG
+R -. "replay mode" .-> SE
+S -. "routing + runtime flags" .-> SE
+QP --> SE --> FE --> PA --> EA
+EA -. "base path" .-> AN
+EA --> RI --> RQ --> AN
+AN --> SY --> RG
+RG --> O1
+RG --> O2
+RG -. "langfuse | langsmith | dual" .-> O3
+O1 --> O4
 
-The default run mode is `auto`: the pipeline attempts to run live when provider credentials are present.  If credentials are missing **and** a replay bundle exists for the entity, it falls back to replay automatically.  If no replay bundle is found, the pipeline proceeds live and will error if credentials are also absent.  To force replay mode unconditionally (no network access, no credentials required), pass `--mode replay`.
+classDef bronze fill:#ffe6e6,stroke:#b30000,stroke-width:1px
+classDef silver fill:#e6f0ff,stroke:#003399,stroke-width:1px
+classDef golden fill:#e6ffe6,stroke:#006400,stroke-width:1px
+classDef external fill:#fce8ff,stroke:#7b2fa8,stroke-width:1.5px,stroke-dasharray:5 3
+classDef artifact fill:#fff8e1,stroke:#e65100,stroke-width:1px,stroke-dasharray:5 5
 
-Live mode (`--mode live`) is also available when provider keys are present.
-
-### Eval Harness
-
-`evals/cases.yaml` defines replay-backed cases covering different evidence conditions for the same entity and field:
-
-- Baseline replay (weak secondary evidence) → `needs_review`, confidence 0.75
-- Assessed replay (agreeing primary sources) → `auto_approve`, confidence 0.97
-
-`evidence-enrich eval` runs all cases and writes a structured report. Current result: **6/6 pass**.
-
-### Local Trace Artifacts
-
-Every run writes trace artifacts to `examples/output/traces/<trace_id>/`:
-
-| File | Content |
-|---|---|
-| `spans.jsonl` | One JSON line per stage span |
-| `trace_summary.json` | Pipeline-level summary: `trace_id`, `total_spans`, `total_latency_ms`, `stages`, `decision`, `overall_confidence` |
-| `trace_timeline.md` | Human-readable stage timeline |
-| `openinference_trace.json` | OpenInference-compatible compatibility export |
-| `resolved_context.json` | Context bundle snapshot for the run |
-
-Each span records: `trace_id`, `stage`, `provider`, `mode`, `latency_ms`, `input_count`, `output_count`, `decision` where applicable, and `agent_iterations` for `retrieval_query` spans in `"agent"` mode.
-
-### Retrieval-Augmented Analysis (Optional)
-
-An optional RAG layer can be enabled to replace the default `text[:6000]` truncation with semantically ranked evidence.
-
-**Key design decisions:**
-
-- **Table-aware chunking:** HTML `<table>` elements and plain-text tables (pipe/tab/Markdown-delimited) are kept as atomic chunks when they fit within `max_table_size`. Large tables that exceed the limit are split on whitespace boundaries without overlap to avoid duplicating numeric data (note: this may break row boundaries for very large tables).
-- **Hybrid scoring:** `0.7 × vector_score + 0.2 × keyword_score + 0.1 × table_boost`. The keyword component anchors exact numeric matches that embeddings compress. The table boost prioritises structured data for financial/numeric queries.
-- **Document-scoped retrieval:** Every query filters by `document_url`. Each document's evidence is retrieved independently, preserving per-document claim attribution through to `FactClaim.source_url`.
-- **Replay safety:** Retrieval is skipped entirely in replay mode. No embedding API calls, no Chroma initialisation, bundles unchanged.
-
-### LangGraph Adaptive Retrieval Agent (Optional)
-
-Setting `retrieval.mode: "agent"` wraps the `HybridRetriever` in a LangGraph `StateGraph` that iteratively retrieves, scores chunk quality, and refines the query when the average score is below a threshold — up to a configurable iteration cap (default 3).
-
-Graph topology: `retrieve → evaluate → branch(refine → retrieve loop | END)`
-
-The number of iterations used is recorded in `SpanRecord.agent_iterations` on the `retrieval_query` span and written to the local trace. This makes retrieval loop depth inspectable without any additional instrumentation.
-
-See [docs/retrieval.md](retrieval.md) for full architecture, config reference, state diagram, and deferred v2 items.
-
-### LangSmith + Langfuse Integration (Opt-In)
-
-Set `LANGSMITH_TRACING=true` and/or provide `LANGFUSE_SECRET_KEY` / `LANGFUSE_PUBLIC_KEY` to enable dual-backend tracing alongside local artifacts. Stage-level spans are recorded without changing pipeline logic. See `docs/observability.md` for setup and dashboard flow.
-
-### Guardrails (Post-Synthesis Safety Checks)
-
-Three automated checks run after synthesis, before the result is returned, and can override the review gate's decision to `AUTO_REJECT`:
-
-| Check | What it does |
-|---|---|
-| **PII** | Scans synthesis text and each claim excerpt for personal data using presidio-analyzer (with regex fallback for email, IBAN, UK NIN when presidio is absent) |
-| **Hallucination** | Verifies that every claim's `source_url` resolves to a document actually fetched during the run — ungrounded citations flip the result to rejected |
-| **Confidence floor** | Rejects the run when `overall_confidence` is below a configurable threshold (default `0.4`, overridable via `GUARDRAILS_CONFIDENCE_FLOOR`) |
-
-Any check failure overrides the review gate's decision to `AUTO_REJECT` and sets `gate_reason` to a structured summary (e.g. `"guardrails failed: hallucination (2 ungrounded claims), confidence (0.31 < 0.40)"`). The full report is attached to `PipelineRunResult.guardrails_report`.
-
-Install optional presidio dependency with:
-
-```bash
-pip install 'evidence_enrichment[guardrails]'
+style INPUTS fill:transparent,stroke:#7b2fa8,stroke-width:1px,stroke-dasharray:4 4
+style PIPE fill:transparent,stroke:#003399,stroke-width:1px,stroke-dasharray:4 4
+style OUTPUTS fill:transparent,stroke:#e65100,stroke-width:1px,stroke-dasharray:4 4
 ```
 
-Without presidio, PII detection falls back to deterministic regex patterns.
+## Feature Areas
 
-### Docker + CI
+| Area | Implemented behavior | Why it matters |
+|---|---|---|
+| Context pack | `system_role.md`, `task_spec.md`, `data_contracts.md`, `failure_modes.md`, `decision_rubric.md`, and `context_manifest.yaml` define the workflow context. | Context is versioned as data instead of disappearing into a prompt string inside code. |
+| Core pipeline | `query_plan -> search -> fetch -> parse -> evidence_assessment -> analysis -> synthesis -> review_gate` is the stable base path. | Each boundary is inspectable, testable, and traceable. |
+| Retrieval extension | `retrieval_indexing` and `retrieval_query` activate only when `retrieval.mode` is `local` or `agent`. | Retrieval is additive, not a breaking redesign of the base workflow. |
+| LangGraph path | `retrieval.mode=agent` runs a retrieve-evaluate-refine loop through a LangGraph `StateGraph`. | The repo shows a real stateful orchestration pattern instead of only claiming compatibility with one. |
+| Replay mode | Bundled replay scenarios preserve a zero-network demo and regression baseline. | Reviewers can inspect behavior without needing external credentials or unstable websites. |
+| Observability | Local traces are always written; remote routing is controlled by `OBSERVABILITY_BACKEND`. | Local debugging never depends on remote SDK state, and privacy controls are explicit. |
+| Eval harness | `evidence-enrich eval` checks expected value, expected decision, and minimum confidence on replay cases. | The repo demonstrates repeatable evaluation, not just a happy-path demo. |
+| MCP surface | The MCP server exposes replay-safe tools and resources over stdio or streamable HTTP. | The pipeline can be consumed by AI clients without inventing a separate adapter layer. |
+| Guardrails | Post-synthesis checks can reject low-confidence or invalid outputs before return. | The final answer is gated by policy rather than treated as automatically safe. |
 
-Full Docker and Docker Compose setup. GitHub Actions CI runs the test suite and eval harness on every push.
+## Observability Positioning
 
----
+The public framing after the Langfuse-first upgrade is:
 
-## What This Repo Does Not Cover
+1. Langfuse is the primary documented remote tracing path.
+2. LangSmith remains supported.
+3. `dual` remains available for side-by-side tracing.
+4. `none` still preserves the local artifact contract.
+5. `TRACE_REDACT_VALUES=true` is the default, so remote traces stay privacy-safe unless explicitly relaxed.
 
-- Bulk enrichment across entity universes (this demo is intentionally scoped to one entity and one field)
-- Document acquisition or PDF retrieval (see `document-acquisition-workbench`)
-- Lakehouse storage of enriched outputs (see `entity-data-lakehouse`)
+See [observability.md](observability.md) for the runtime behavior and credential lifecycle details.
+
+## Retrieval Positioning
+
+The public framing for retrieval is intentionally conservative:
+
+1. Retrieval is optional and does not change replay bundles.
+2. `local` mode is a bounded Chroma-backed RAG path.
+3. `agent` mode is the current LangGraph stateful workflow path.
+4. Document attribution remains per-source because retrieval is document-scoped.
+
+See [retrieval.md](retrieval.md) for chunking, scoring, config, and the LangGraph loop.
+
+## Verification Surface
+
+| Surface | What it checks |
+|---|---|
+| `tests/test_observability.py` | Backend routing, privacy defaults, runtime overrides, credential eviction, and tombstone behavior |
+| `tests/test_pipeline.py` | End-to-end pipeline behavior and artifact generation |
+| `tests/test_retrieval_agent.py` | Retrieval-agent orchestration and replay boundaries |
+| `tests/test_mcp_server.py` | MCP tools, resources, and transport-safe defaults |
+| `tests/` | Full local regression suite exercised by CI |
+| [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) | Installs `.[dev]`, runs `pytest tests/`, then `ruff check .` |
+
+## What This Repo Does Not Try To Be
+
+- It is not a bulk enrichment platform across large entity universes.
+- It is not a generic multi-agent supervisor framework.
+- It is not a production telemetry stack claim.
+- It does not replace the separate document acquisition or lakehouse repos.

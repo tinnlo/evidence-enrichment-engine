@@ -6,7 +6,18 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from langsmith import traceable
+try:
+    from langsmith import traceable
+except ImportError:
+
+    def traceable(*args, **kwargs):  # type: ignore[misc]
+        """No-op fallback when langsmith is not installed."""
+
+        def _decorator(fn):
+            return fn
+
+        return _decorator
+
 
 try:
     from langfuse import observe  # type: ignore[import-untyped]
@@ -70,6 +81,10 @@ from evidence_enrichment.observability.langsmith import (
     summarize_synthesis,
     summarize_synthesis_stage,
     trace_payload_inputs,
+)
+from evidence_enrichment.observability.runtime import (
+    activate_runtime_observability_config,
+    reset_runtime_observability_config,
 )
 from evidence_enrichment.observability.tracer import LocalTracer
 from evidence_enrichment.pipeline.replay import load_replay_bundle
@@ -152,76 +167,86 @@ class EvidenceCoordinator:
         replay_bundle: str | None = None,
         artifact_label: str | None = None,
     ) -> PipelineRunResult:
-        self._retrieval_degraded = False
-        effective_mode = mode or self.settings.default_mode
-        entity_id = str(entity.get("entity_id") or entity.get("id") or "unknown")
-        tracer = LocalTracer(
-            mode=effective_mode, entity_id=entity_id, field_name=enricher.field_name
+        runtime_token = activate_runtime_observability_config(
+            backend=self.settings.observability_backend,
+            trace_redact_values=self.settings.trace_redact_values,
         )
-        resolved_context = self.context_resolver.resolve(
-            entity_id=entity_id, field_name=enricher.field_name
-        )
-        with tracer.span("query_plan", provider="local_context", input_count=1) as span:
-            search_plan = self._stage_query_plan(
-                entity,
-                enricher,
-                trace_payload={
-                    "mode": effective_mode,
-                    "entity_id": entity_id,
-                    "field_name": enricher.field_name,
-                    "company_name": str(
-                        entity.get("name") or entity.get("company_name") or ""
-                    ),
-                    "context_entry_ids": sorted(
-                        {
-                            entry_id
-                            for stage in resolved_context.stages.values()
-                            for entry_id in stage.entry_ids
-                        }
-                    ),
-                },
+        try:
+            self._retrieval_degraded = False
+            effective_mode = mode or self.settings.default_mode
+            entity_id = str(entity.get("entity_id") or entity.get("id") or "unknown")
+            tracer = LocalTracer(
+                mode=effective_mode,
+                entity_id=entity_id,
+                field_name=enricher.field_name,
             )
-            span["output_count"] = len(
-                [search_plan.primary_query, *search_plan.query_variants]
+            resolved_context = self.context_resolver.resolve(
+                entity_id=entity_id, field_name=enricher.field_name
             )
-        replay_path = self._resolve_replay_path(replay_bundle, entity, enricher)
-        if effective_mode == "replay":
-            bundle = load_replay_bundle(replay_path)
-            result = await self._run_with_replay(
-                entity, enricher, search_plan, bundle, effective_mode, tracer
-            )
-        elif effective_mode == "auto" and replay_path.exists():
-            try:
-                self._preflight_live_readiness()
+            with tracer.span("query_plan", provider="local_context", input_count=1) as span:
+                search_plan = self._stage_query_plan(
+                    entity,
+                    enricher,
+                    trace_payload={
+                        "mode": effective_mode,
+                        "entity_id": entity_id,
+                        "field_name": enricher.field_name,
+                        "company_name": str(
+                            entity.get("name") or entity.get("company_name") or ""
+                        ),
+                        "context_entry_ids": sorted(
+                            {
+                                entry_id
+                                for stage in resolved_context.stages.values()
+                                for entry_id in stage.entry_ids
+                            }
+                        ),
+                    },
+                )
+                span["output_count"] = len(
+                    [search_plan.primary_query, *search_plan.query_variants]
+                )
+
+            replay_path = self._resolve_replay_path(replay_bundle, entity, enricher)
+            if effective_mode == "replay":
+                bundle = load_replay_bundle(replay_path)
+                result = await self._run_with_replay(
+                    entity, enricher, search_plan, bundle, effective_mode, tracer
+                )
+            elif effective_mode == "auto" and replay_path.exists():
+                try:
+                    self._preflight_live_readiness()
+                    result = await self._run_live(
+                        entity, enricher, search_plan, effective_mode, tracer
+                    )
+                except (RuntimeError, ImportError) as exc:
+                    logging.warning(
+                        "auto mode: live providers unavailable (%s); falling back to replay bundle %s",
+                        exc,
+                        replay_path,
+                    )
+                    bundle = load_replay_bundle(replay_path)
+                    result = await self._run_with_replay(
+                        entity, enricher, search_plan, bundle, "replay", tracer
+                    )
+                    result.fallback_from_live = True
+            else:
                 result = await self._run_live(
                     entity, enricher, search_plan, effective_mode, tracer
                 )
-            except (RuntimeError, ImportError) as exc:
-                logging.warning(
-                    "auto mode: live providers unavailable (%s); falling back to replay bundle %s",
-                    exc,
-                    replay_path,
-                )
-                bundle = load_replay_bundle(replay_path)
-                result = await self._run_with_replay(
-                    entity, enricher, search_plan, bundle, "replay", tracer
-                )
-                result.fallback_from_live = True
-        else:
-            result = await self._run_live(
-                entity, enricher, search_plan, effective_mode, tracer
+            trace_artifacts = tracer.write(self.settings.trace_output_path)
+            resolved_context_path = trace_artifacts.trace_dir / "resolved_context.json"
+            resolved_context_path.write_text(
+                resolved_context.model_dump_json(indent=2), encoding="utf-8"
             )
-        trace_artifacts = tracer.write(self.settings.trace_output_path)
-        resolved_context_path = trace_artifacts.trace_dir / "resolved_context.json"
-        resolved_context_path.write_text(
-            resolved_context.model_dump_json(indent=2), encoding="utf-8"
-        )
-        refs = trace_artifacts.as_refs()
-        refs["resolved_context"] = str(resolved_context_path)
-        result.resolved_context = resolved_context
-        result.trace_id = tracer.trace_id
-        result.artifact_refs = refs
-        return result
+            refs = trace_artifacts.as_refs()
+            refs["resolved_context"] = str(resolved_context_path)
+            result.resolved_context = resolved_context
+            result.trace_id = tracer.trace_id
+            result.artifact_refs = refs
+            return result
+        finally:
+            reset_runtime_observability_config(runtime_token)
 
     def _resolve_replay_path(
         self, replay_bundle: str | None, entity: dict, enricher: BaseEnricher

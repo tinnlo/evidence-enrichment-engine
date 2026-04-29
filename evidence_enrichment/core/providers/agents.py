@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 from evidence_enrichment.core.models.contracts import AnalysisReport, ConflictManifest, FactClaim, ParsedDocument, SynthesisResult
 from evidence_enrichment.core.models.enums import ProviderType
 from evidence_enrichment.core.providers.base import AnalysisAgent, SynthesisAgent
-from evidence_enrichment.observability.langsmith import apply_langsmith_env
+from evidence_enrichment.observability.langsmith import _should_redact
+from evidence_enrichment.observability.router import langsmith_tracing_ready
 
 if TYPE_CHECKING:
     from evidence_enrichment.core.retrieval.models import RetrievalResult
@@ -31,7 +32,9 @@ def _extract_json(text: str) -> dict:
 
 
 def _wrap_openai_client(client):
-    if not apply_langsmith_env():
+    if _should_redact():
+        return client
+    if not langsmith_tracing_ready():
         return client
     try:
         from langsmith.wrappers import wrap_openai
@@ -42,7 +45,9 @@ def _wrap_openai_client(client):
 
 
 def _wrap_anthropic_client(client):
-    if not apply_langsmith_env():
+    if _should_redact():
+        return client
+    if not langsmith_tracing_ready():
         return client
     try:
         from langsmith.wrappers import wrap_anthropic

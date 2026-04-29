@@ -5,8 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from evidence_enrichment.observability.langsmith import get_langsmith_client
-
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -14,8 +12,19 @@ if str(ROOT) not in sys.path:
 
 
 @pytest.fixture(autouse=True)
-def disable_langsmith_tracing(monkeypatch):
+def reset_observability_env(monkeypatch):
+    """Clear all observability env vars and internal settings state before/after each test.
+
+    Covers LangSmith, LangChain legacy aliases, Langfuse, and the backend
+    selector so no test can inherit shell-supplied observability state.
+    """
     for key in [
+        "OBSERVABILITY_BACKEND",
+        "TRACE_REDACT_VALUES",
+        "LANGFUSE_SECRET_KEY",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_BASE_URL",
+        "LANGFUSE_HOST",
         "LANGSMITH_TRACING",
         "LANGSMITH_API_KEY",
         "LANGSMITH_PROJECT",
@@ -24,6 +33,28 @@ def disable_langsmith_tracing(monkeypatch):
         "LANGCHAIN_PROJECT",
     ]:
         monkeypatch.delenv(key, raising=False)
-    get_langsmith_client.cache_clear()
+
+    import evidence_enrichment.config.settings as settings_mod
+    from evidence_enrichment.observability.runtime import (
+        clear_default_runtime_observability_config,
+        clear_evicted_observability_values,
+        clear_runtime_observability_config,
+    )
+
+    settings_mod._AMBIENT_OBSERVABILITY_ENV.clear()
+    settings_mod._LAST_MANAGED_OBSERVABILITY_ENV.clear()
+    settings_mod._SHELL_SET_OBSERVABILITY_KEYS.clear()
+    settings_mod._EVICTION_PENDING_KEYS.clear()
+    settings_mod._reset_settings_cache()
+    clear_default_runtime_observability_config()
+    clear_evicted_observability_values()
+    clear_runtime_observability_config()
     yield
-    get_langsmith_client.cache_clear()
+    settings_mod._AMBIENT_OBSERVABILITY_ENV.clear()
+    settings_mod._LAST_MANAGED_OBSERVABILITY_ENV.clear()
+    settings_mod._SHELL_SET_OBSERVABILITY_KEYS.clear()
+    settings_mod._EVICTION_PENDING_KEYS.clear()
+    settings_mod._reset_settings_cache()
+    clear_default_runtime_observability_config()
+    clear_evicted_observability_values()
+    clear_runtime_observability_config()

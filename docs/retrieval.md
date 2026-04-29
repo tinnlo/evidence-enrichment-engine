@@ -1,93 +1,165 @@
-# Retrieval-Augmented Analysis (Optional)
+# Retrieval
 
-This document covers the optional RAG layer added to the evidence enrichment pipeline.
+The retrieval layer is optional. When enabled, it inserts a bounded RAG step between `evidence_assessment` and `analysis` so the analysis prompt can work from semantically ranked document chunks instead of a fixed `text[:6000]` truncation.
 
-When enabled, the pipeline indexes accepted documents into a local Chroma vector store after evidence assessment and retrieves the most relevant chunks for each document before the analysis stage. Retrieved chunks replace the default `text[:6000]` truncation with semantically ranked evidence.
+The design goal is not "add more AI." The design goal is to make evidence selection explicit while preserving the replay-first artifact contract.
 
----
+## Retrieval System View
 
-## Architecture
+```mermaid
+graph TD
 
-The retrieval layer sits between `evidence_assessment` and `analysis`:
+subgraph INPUTS["Inputs and controls"]
+  direction TB
+  D["Accepted documents"]:::bronze
+  Q["Field query"]:::external
+  C["Retrieval config"]:::external
+end
+
+subgraph RET["Retrieval pipeline"]
+  direction TB
+  P["Structured parse"]:::bronze
+  CH["TableAwareChunker"]:::silver
+  VS["Chroma store"]:::external
+  HR["HybridRetriever"]:::silver
+  AG["LangGraph loop<br/>(optional)"]:::golden
+end
+
+subgraph OUTPUTS["Outputs and telemetry"]
+  direction TB
+  O1["Ranked chunks for analysis"]:::artifact
+  O2["Local spans<br/>retrieval_indexing | retrieval_query"]:::artifact
+  O3["Persisted vectors<br/>examples/output/chroma"]:::external
+end
+
+D --> P --> CH --> VS
+Q --> HR
+VS --> HR
+C -. "chunking rules" .-> CH
+C -. "weights + top_k" .-> HR
+HR --> O1
+HR --> O2
+VS --> O3
+HR -. "agent mode" .-> AG
+AG --> HR
+
+classDef bronze fill:#ffe6e6,stroke:#b30000,stroke-width:1px
+classDef silver fill:#e6f0ff,stroke:#003399,stroke-width:1px
+classDef golden fill:#e6ffe6,stroke:#006400,stroke-width:1px
+classDef external fill:#fce8ff,stroke:#7b2fa8,stroke-width:1.5px,stroke-dasharray:5 3
+classDef artifact fill:#fff8e1,stroke:#e65100,stroke-width:1px,stroke-dasharray:5 5
+
+style INPUTS fill:transparent,stroke:#7b2fa8,stroke-width:1px,stroke-dasharray:4 4
+style RET fill:transparent,stroke:#003399,stroke-width:1px,stroke-dasharray:4 4
+style OUTPUTS fill:transparent,stroke:#e65100,stroke-width:1px,stroke-dasharray:4 4
+```
+
+## Mode Comparison
+
+| `retrieval.mode` | Behavior | Operational notes |
+|---|---|---|
+| `off` | No retrieval stages are added. `analysis` works from the parsed document text directly. | Default behavior. Replay bundles and artifacts stay unchanged. |
+| `local` | Accepted documents are chunked, embedded, stored in Chroma, and queried before `analysis`. | Requires the `[retrieval]` extra and `OPENAI_API_KEY` for embeddings in live mode. |
+| `agent` | Runs the same retrieval stack, but query refinement is managed by a LangGraph `StateGraph`. | Adds `agent_iterations` to the `retrieval_query` span so loop depth is inspectable. |
+
+Replay mode skips retrieval entirely even if retrieval is configured. That preserves the zero-network demo path and avoids changing stored replay bundles.
+
+## Pipeline Placement
+
+Base path:
 
 ```text
-query_plan
-  -> search
-  -> fetch
-  -> parse  (structured: HTML table/heading detection active)
-  -> evidence_assessment
-  -> retrieval_indexing  (NEW: chunk + embed + upsert accepted docs)
-  -> retrieval_query     (NEW: retrieve top_k chunks per doc before analysis)
-  -> analysis  (uses retrieved chunks instead of text[:6000])
-  -> synthesis
-  -> review_gate
+query_plan -> search -> fetch -> parse -> evidence_assessment -> analysis -> synthesis -> review_gate
 ```
 
-When retrieval mode is `"off"` (default), the pipeline is unchanged. No new stages appear, the parser uses the shallow path, and `parse_with_structure` is never called.
+Retrieval-enabled path:
 
----
-
-## Table-Aware Chunking
-
-The `TableAwareChunker` (adapted from a production KB ingestion pattern) treats HTML tables and plain-text tables as atomic units rather than splitting them at character boundaries.
-
-**Motivation:** LLM analysis of structured numeric evidence (revenue, employee counts, geographic breakdowns) degrades significantly when tables are split mid-row. An atomic table chunk keeps row/column relationships intact for the embedding model and the downstream LLM prompt.
-
-**Logic:**
-
-1. The parser (`parse_with_structure`) extracts block-level structure from HTML:
-   - `<table>` tags → `ContentBlock(block_type="table")`
-   - `<h1>`–`<h6>` tags → `ContentBlock(block_type="heading")`
-   - All remaining content → `ContentBlock(block_type="text")`
-   - Plain-text table heuristics detect pipe-delimited, tab-delimited, and Markdown tables in the text remainder
-
-2. The chunker processes each block:
-   - Tables within `max_table_size` characters → single atomic chunk (no overlap)
-   - Tables exceeding `max_table_size` → split on whitespace boundaries **without overlap** to avoid duplicating numeric rows
-   - Text blocks → character-based chunking with configurable `chunk_size` and `overlap`
-   - Blocks below `min_size` chars are dropped
-
-**Defaults:** `chunk_size=1500`, `overlap=200`, `min_size=80`, `max_table_size=4000`
-
----
-
-## Hybrid Scoring Formula
-
-The `HybridRetriever` combines three signals:
-
-```
-score = 0.7 × vector_score + 0.2 × keyword_score + 0.1 × table_boost
+```text
+query_plan -> search -> fetch -> parse -> evidence_assessment -> retrieval_indexing -> retrieval_query -> analysis -> synthesis -> review_gate
 ```
 
-| Signal | Source | Range |
-|--------|--------|-------|
-| `vector_score` | Cosine similarity from Chroma (distance → similarity) | [0, 1] |
-| `keyword_score` | Term-overlap fraction: `|query_terms ∩ chunk_terms| / |query_terms|` | [0, 1] |
-| `table_boost` | 0.1 if chunk is a table AND query contains numeric/financial keywords | {0, 0.1} |
+The retrieval stages are additive. They do not rename, remove, or replace the rest of the pipeline contract.
 
-**Rationale:** The vector score captures semantic similarity but misses exact numeric matches (e.g., "$1.4B", "Q3 2024") because embeddings compress token-level detail. The keyword score provides a lexical anchor. The table boost prioritises structured numeric evidence for financial-type queries.
+## Chunking Strategy
 
-Weights are configurable in `evidence_enrichment.yaml` under `retrieval.weights`.
+The `TableAwareChunker` is intentionally conservative because the workflow is evidence-oriented rather than chatbot-oriented.
 
----
+| Chunk type | Rule | Why it exists |
+|---|---|---|
+| HTML tables and plain-text tables | Keep as one chunk when the table fits within `max_table_size` | Row and column relationships matter for numeric evidence |
+| Large tables | Split on whitespace boundaries without overlap | Avoid duplicate numeric rows across adjacent chunks |
+| Normal text blocks | Character-based chunking with overlap | Preserve local context while keeping embedding payloads bounded |
+| Very small blocks | Drop below `min_size` | Avoid noisy low-information chunks |
+
+Defaults:
+
+- `chunk_size=1500`
+- `overlap=200`
+- `min_size=80`
+- `max_table_size=4000`
+
+When retrieval is active, parsing uses the structured path so headings, tables, and plain-text table heuristics can be preserved before chunking.
+
+## Scoring Formula
+
+The `HybridRetriever` combines semantic similarity, lexical overlap, and a table bias:
+
+```text
+score = 0.7 * vector_score + 0.2 * keyword_score + 0.1 * table_boost
+```
+
+| Signal | Source | Range | Purpose |
+|---|---|---|---|
+| `vector_score` | Chroma cosine similarity transformed into similarity space | `[0, 1]` | Captures semantic relevance |
+| `keyword_score` | `|query_terms ∩ chunk_terms| / |query_terms|` | `[0, 1]` | Preserves exact lexical anchors for numeric or named evidence |
+| `table_boost` | Applied when the chunk is table-like and the query is numeric/financial | `{0, 0.1}` | Prioritizes structured evidence when tables are likely to matter |
+
+The weights are configurable in `evidence_enrichment.yaml` under `retrieval.weights`.
 
 ## Document-Scoped Retrieval
 
-All retrieval queries are filtered by `document_url`:
+Retrieval is filtered by `document_url`, not run across the full accepted-document pool.
 
-```python
-results = retriever.retrieve(query=field_name, document_url=document.url)
+That constraint is deliberate:
+
+1. `analysis` produces claims that must stay attributable to the source document.
+2. `FactClaim.source_url` would become misleading if a claim nominally attributed to document A used chunks from document B.
+3. Cross-document synthesis already happens later at the `synthesis` stage where claims are pooled explicitly.
+
+## LangGraph Adaptive Loop
+
+`retrieval.mode=agent` wraps the retriever in a LangGraph loop that can iterate before handing chunks to `analysis`.
+
+```mermaid
+graph TD
+
+subgraph LOOP["Adaptive retrieval loop"]
+  direction TB
+  R["Retrieve"]:::silver
+  E["Evaluate chunk quality"]:::silver
+  F["Refine query"]:::golden
+  ENDNODE["Return chunks"]:::artifact
+end
+
+R --> E
+E -. "quality low" .-> F
+F --> R
+E -. "quality OK or cap hit" .-> ENDNODE
+
+classDef silver fill:#e6f0ff,stroke:#003399,stroke-width:1px
+classDef golden fill:#e6ffe6,stroke:#006400,stroke-width:1px
+classDef artifact fill:#fff8e1,stroke:#e65100,stroke-width:1px,stroke-dasharray:5 5
+
+style LOOP fill:transparent,stroke:#003399,stroke-width:1px,stroke-dasharray:4 4
 ```
 
-This is a deliberate architectural constraint. The pipeline produces one `AnalysisReport` per source document, with claims attributed to that document's URL. If retrieval pulled chunks across documents, source attribution on `FactClaim.source_url` would break — the claim would appear to come from document A but use evidence from document B.
+Operational details:
 
-**Effect:** Each document's chunks are retrieved independently. Cross-document synthesis happens downstream at the `synthesis` stage where all claims are pooled.
+- The loop stops when the average chunk score clears the quality threshold.
+- The loop also stops when the configured iteration cap is reached.
+- The number of retrieve-evaluate cycles is recorded as `agent_iterations` on the `retrieval_query` span.
 
----
-
-## Configuration Reference
-
-All retrieval settings live under the `retrieval` key in `evidence_enrichment.yaml`:
+## Config Reference
 
 ```yaml
 retrieval:
@@ -101,40 +173,24 @@ retrieval:
   min_doc_chars: 2000
 ```
 
-| Key | Description | Default |
-|-----|-------------|---------|
-| `mode` | `"off"` disables retrieval entirely. `"local"` enables Chroma-backed RAG. `"agent"` wraps the retriever in a LangGraph adaptive agent. | `"off"` |
-| `persist_path` | Path for Chroma's persistent storage. Covered by `.gitignore`. | `examples/output/chroma` |
-| `chunk_size` | Target character count per text chunk. | `1500` |
-| `overlap` | Overlap in characters between consecutive text chunks. | `200` |
-| `max_table_size` | Max chars before a table block is split (split has no overlap). | `4000` |
-| `top_k` | Number of retrieved chunks returned to the analysis prompt. | `5` |
-| `embedding_model` | OpenAI embedding model name. | `text-embedding-3-small` |
-| `min_doc_chars` | Minimum document character count to index. Shorter docs skip indexing. | `2000` |
+| Key | Meaning | Default |
+|---|---|---|
+| `mode` | Retrieval execution mode | `off` |
+| `persist_path` | Chroma persistence directory | `examples/output/chroma` |
+| `chunk_size` | Target text chunk size in characters | `1500` |
+| `overlap` | Character overlap between text chunks | `200` |
+| `max_table_size` | Maximum chars before a table is split | `4000` |
+| `top_k` | Number of ranked chunks returned per document | `5` |
+| `embedding_model` | Embedding model used for indexing and retrieval | `text-embedding-3-small` |
+| `min_doc_chars` | Minimum document length to index | `2000` |
 
-### Enabling Retrieval
-
-```yaml
-# evidence_enrichment.yaml
-retrieval:
-  mode: "local"
-```
-
-Requires `OPENAI_API_KEY` in `.env` (the same key used for live analysis providers).
-
-Install the retrieval dependency group:
+## Install And Run
 
 ```bash
-pip install -e ".[retrieval]"
+python -m pip install -e ".[retrieval]"
 ```
 
-Run with retrieval active:
-
-```bash
-evidence-enrich run --entity examples/microsoft.json --field hq_country --mode live
-```
-
-### Enabling Adaptive Agent Mode
+Example config:
 
 ```yaml
 # evidence_enrichment.yaml
@@ -142,56 +198,17 @@ retrieval:
   mode: "agent"
 ```
 
-In `"agent"` mode, retrieval is wrapped in a LangGraph `StateGraph` that
-iteratively retrieves, scores, and refines the query until the average
-chunk score exceeds a quality threshold (default 0.40) or the iteration
-cap (default 3) is reached.
-
-#### State diagram
-
-```
-         ┌──────────┐
-         │ retrieve │◄──────────────────┐
-         └────┬─────┘                   │
-              │                         │
-         ┌────▼──────┐   quality low    │
-         │ evaluate  ├──────────────►[refine]
-         └────┬──────┘
-              │ quality OK / cap hit
-              ▼
-            [END]
-```
-
-`agent_iterations` (the number of retrieve→evaluate cycles) is recorded in
-the `retrieval_query` span and written to the local trace file.
-
-Install the same `[retrieval]` extras group (LangGraph is included):
+Example run:
 
 ```bash
-pip install -e ".[retrieval]"
+evidence-enrich run --entity examples/microsoft.json --field hq_country --mode live
 ```
 
----
+`OPENAI_API_KEY` is required for live retrieval because chunk embeddings are created with the OpenAI embeddings API.
 
-## Replay Mode Behaviour
+## Operational Boundaries
 
-Retrieval is skipped entirely in replay mode. No embedding API calls are made, Chroma is not initialised, and replay bundles are loaded unchanged. This preserves the zero-credential, zero-network-access guarantee of the default replay flow.
-
-The `ReplayAnalysisAgent.analyze()` method accepts the `retrieved_chunks` parameter for interface compatibility but ignores it.
-
----
-
-## Privacy Note
-
-The `examples/output/chroma/` path is covered by `.gitignore`. Chroma embeddings and chunks derived from public web content are never committed to the repository.
-
----
-
-## Deferred (v2)
-
-- `text-embedding-3-large` benchmarking against `text-embedding-3-small`
-- Embedding-based entity matching (semantic similarity to company name)
-- Cross-document retrieval with evidence re-attribution
-- PDF parsing support (currently HTML-only)
-- LangSmith `@traceable` decorators on retrieval stages
-- Replay fixtures with pre-computed embeddings for offline retrieval tests
+- Replay mode skips retrieval entirely.
+- Chroma data lives under `examples/output/chroma/` and is covered by `.gitignore`.
+- Retrieval does not change the local trace artifact contract; it only adds `retrieval_indexing` and `retrieval_query` spans when active.
+- The replay analysis agent accepts `retrieved_chunks` for interface compatibility but ignores them in replay mode.
