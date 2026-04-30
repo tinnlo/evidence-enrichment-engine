@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 
@@ -135,6 +136,44 @@ def test_langfuse_client_none_when_import_missing(monkeypatch) -> None:
     from evidence_enrichment.observability.langfuse import get_langfuse_client
 
     assert get_langfuse_client() is None
+
+
+def test_langfuse_observe_bypasses_sdk_when_client_unavailable(monkeypatch) -> None:
+    """Local-only runs must not touch the Langfuse SDK decorator."""
+    from evidence_enrichment.observability import langfuse as lf_module
+
+    class _ExplodingModule:
+        @staticmethod
+        def observe(*_args, **_kwargs):
+            raise AssertionError("Langfuse SDK decorator should not be used")
+
+    monkeypatch.setitem(sys.modules, "langfuse", _ExplodingModule())
+    monkeypatch.setattr(lf_module, "get_langfuse_client", lambda: None)
+
+    @lf_module.observe(name="test", as_type="chain")
+    def _wrapped(value: str) -> str:
+        return value.upper()
+
+    assert _wrapped("ok") == "OK"
+
+
+def test_langfuse_observe_async_bypasses_sdk_when_client_unavailable(monkeypatch) -> None:
+    """Async stage methods must also bypass Langfuse when local-only."""
+    from evidence_enrichment.observability import langfuse as lf_module
+
+    class _ExplodingModule:
+        @staticmethod
+        def observe(*_args, **_kwargs):
+            raise AssertionError("Langfuse SDK decorator should not be used")
+
+    monkeypatch.setitem(sys.modules, "langfuse", _ExplodingModule())
+    monkeypatch.setattr(lf_module, "get_langfuse_client", lambda: None)
+
+    @lf_module.observe(name="test_async", as_type="chain")
+    async def _wrapped(value: str) -> str:
+        return value.upper()
+
+    assert asyncio.run(_wrapped("ok")) == "OK"
 
 
 def test_record_stage_observation_swallows_errors(monkeypatch) -> None:

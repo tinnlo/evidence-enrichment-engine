@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import wraps
+from inspect import iscoroutinefunction
 import logging
 import os
 from typing import Any, Callable, Mapping
@@ -52,6 +54,52 @@ def _pick_value(*values: str | None) -> str | None:
 def _mapping_value(mapping: Mapping[str, str | None], key: str) -> str | None:
     value = mapping.get(key)
     return value if value else None
+
+
+def observe(*args, **kwargs):  # type: ignore[misc]
+    """Gate Langfuse's decorator behind backend + credential readiness.
+
+    The raw SDK decorator can initialize Langfuse even when this process has
+    selected ``OBSERVABILITY_BACKEND=none`` or does not have a usable public key.
+    That causes noisy auth warnings during replay/eval flows that should remain
+    local-only. This wrapper keeps the stage function undecorated until Langfuse
+    is both selected and fully configured.
+    """
+
+    def _decorator(fn):
+        decorated_fn = None
+
+        def _get_decorated_fn():
+            nonlocal decorated_fn
+            if decorated_fn is not None:
+                return decorated_fn
+            try:
+                from langfuse import observe as sdk_observe  # type: ignore[import-untyped]
+            except ImportError:
+                decorated_fn = fn
+                return decorated_fn
+            decorated_fn = sdk_observe(*args, **kwargs)(fn)
+            return decorated_fn
+
+        if iscoroutinefunction(fn):
+
+            @wraps(fn)
+            async def _wrapped(*f_args, **f_kwargs):
+                if get_langfuse_client() is None:
+                    return await fn(*f_args, **f_kwargs)
+                return await _get_decorated_fn()(*f_args, **f_kwargs)
+
+            return _wrapped
+
+        @wraps(fn)
+        def _wrapped(*f_args, **f_kwargs):
+            if get_langfuse_client() is None:
+                return fn(*f_args, **f_kwargs)
+            return _get_decorated_fn()(*f_args, **f_kwargs)
+
+        return _wrapped
+
+    return _decorator
 
 
 def apply_langfuse_env(

@@ -19,19 +19,6 @@ except ImportError:
         return _decorator
 
 
-try:
-    from langfuse import observe  # type: ignore[import-untyped]
-except ImportError:
-
-    def observe(*args, **kwargs):  # type: ignore[misc]
-        """No-op fallback when langfuse is not installed."""
-
-        def _decorator(fn):
-            return fn
-
-        return _decorator
-
-
 from evidence_enrichment.config.settings import FieldThresholds, Settings, get_settings
 from evidence_enrichment.core.analysis.replay import ReplayAnalysisAgent
 from evidence_enrichment.context.resolver import ContextResolver
@@ -68,7 +55,7 @@ from evidence_enrichment.core.quality.gates import (
 )
 from evidence_enrichment.core.search.query_planner import score_search_result
 from evidence_enrichment.core.synthesis.replay import ReplaySynthesisAgent
-from evidence_enrichment.observability.langfuse import record_stage_observation
+from evidence_enrichment.observability.langfuse import observe, record_stage_observation
 from evidence_enrichment.observability.langsmith import (
     summarize_analysis_stage,
     summarize_assessed_documents,
