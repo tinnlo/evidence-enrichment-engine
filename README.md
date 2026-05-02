@@ -44,7 +44,7 @@ end
 subgraph OUTPUTS["Artifacts and integrations"]
   direction TB
   O1["Pipeline result"]:::artifact
-  O2["Local trace artifacts<br/>spans.jsonl | trace_summary.json<br/>trace_timeline.md | openinference_trace.json<br/>resolved_context.json"]:::artifact
+  O2["Local trace artifacts<br/>spans.jsonl | trace_summary.json<br/>trace_timeline.md | openinference_trace.json<br/>resolved_context.json<br/>finops_summary.json | execution_policy.json"]:::artifact
   O3["Optional remote traces<br/>Langfuse | LangSmith"]:::external
   O4["Replay evals + MCP clients"]:::external
 end
@@ -180,7 +180,7 @@ The execution policy layer governs **capability** — which live-capability surf
 |---|---|
 | `off` | No policy enforcement. All actions proceed. Artifact still written with empty decisions list. |
 | `audit` | All actions proceed. Policy violations are recorded in `execution_policy.json` but never block the run. |
-| `enforce` | Disallowed actions are blocked. The run returns a structured result with a `gate_reason` instead of raising an exception. |
+| `enforce` | Disallowed actions are blocked. The run returns a structured `PipelineRunResult` with `gate_reason="policy_blocked:<action>"` instead of raising an exception. The block is also recorded in `execution_policy.json`. |
 
 Governed action surfaces:
 

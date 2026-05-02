@@ -343,9 +343,9 @@ The execution policy layer governs *capability* — which live-network surfaces 
 
 | Mode | Behaviour |
 |------|-----------|
-| `off` (default) | All actions pass through. `execution_policy.json` is still written with an empty `decisions` list so consumers can distinguish "policy off" from "not configured". |
-| `audit` | All actions pass through; violations (actions outside `allowed_actions`) are recorded in the policy report without blocking the run. |
-| `enforce` | Actions outside `allowed_actions` are blocked; the pipeline returns a structured result with a `gate_reason` set. |
+| `off` (default) | All actions pass through. No decisions are recorded. `execution_policy.json` is still written with an empty `decisions` list so consumers can distinguish "policy off" from "not configured". |
+| `audit` | All actions pass through. Every checked action is recorded. Actions outside `allowed_actions` get `reason: "audit_violation"` but the run is never blocked. |
+| `enforce` | Actions outside `allowed_actions` are blocked. The pipeline returns a structured `PipelineRunResult` with `gate_reason="policy_blocked:<action>"` instead of raising an exception. |
 
 ### Governed Actions
 
@@ -364,7 +364,29 @@ The replay path never reaches any live-capability gate. Running with `mode="enfo
 
 ### Policy Artifacts
 
-Every run writes an `execution_policy.json` artifact alongside `finops_summary.json` in the per-run UUID directory. The file is always written, regardless of mode:
+Every run writes an `execution_policy.json` artifact alongside `finops_summary.json` in the per-run UUID directory. The file is always written, regardless of mode.
+
+Each `PolicyDecision` object in the `decisions` array has these fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `action` | string | The action name (e.g. `"search"`) |
+| `allowed` | bool | Whether the action was permitted |
+| `mode` | string | The policy mode active at check time |
+| `reason` | string | One of the reason codes below |
+| `timestamp` | ISO-8601 string | UTC time of the check |
+
+Reason codes produced by the engine:
+
+| `reason` value | When it appears |
+|----------------|----------------|
+| `policy_off` | Mode is `off` — action always allowed, decision not recorded |
+| `audit_allowed` | Mode is `audit`, action is in `allowed_actions` |
+| `audit_violation` | Mode is `audit`, action is **not** in `allowed_actions` (run still proceeds) |
+| `enforce_allowed` | Mode is `enforce`, action is in `allowed_actions` |
+| `enforce_blocked:<action>_not_in_allowed_actions` | Mode is `enforce`, action blocked |
+
+Example `execution_policy.json` for an enforce-mode run where `remote_tracing` is not allowed:
 
 ```json
 {
@@ -374,23 +396,35 @@ Every run writes an `execution_policy.json` artifact alongside `finops_summary.j
       "action": "search",
       "allowed": true,
       "mode": "enforce",
-      "reason": "allowed",
+      "reason": "enforce_allowed",
       "timestamp": "2026-05-02T17:00:00.000000+00:00"
     },
     {
       "action": "remote_tracing",
       "allowed": false,
       "mode": "enforce",
-      "reason": "policy_blocked:remote_tracing",
+      "reason": "enforce_blocked:remote_tracing_not_in_allowed_actions",
       "timestamp": "2026-05-02T17:00:01.000000+00:00"
     }
   ],
   "blocked_actions": ["remote_tracing"],
-  "violations": []
+  "violations": [
+    {
+      "action": "remote_tracing",
+      "allowed": false,
+      "mode": "enforce",
+      "reason": "enforce_blocked:remote_tracing_not_in_allowed_actions",
+      "timestamp": "2026-05-02T17:00:01.000000+00:00"
+    }
+  ]
 }
 ```
 
-In `off` mode the file exists with `decisions: []` and `blocked_actions: []`. In `audit` mode, blocked actions are recorded in `violations` but not in `blocked_actions` (the run is not blocked). In `enforce` mode, blocked actions appear in both `blocked_actions` and `violations`.
+In `off` mode the file exists with `decisions: []`, `blocked_actions: []`, and `violations: []`.
+In `audit` mode, out-of-policy actions appear in `violations` but not in `blocked_actions` (the run is not blocked).
+In `enforce` mode, blocked actions appear in both `blocked_actions` and `violations`.
+
+The `PipelineRunResult.gate_reason` field (separate from the artifact) is set to `"policy_blocked:<action>"` when enforce mode blocks a run.
 
 ### Configuring Execution Policy
 
