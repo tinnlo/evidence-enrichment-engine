@@ -29,3 +29,9 @@ retrieval:
   embedding_model: text-embedding-3-small
   min_doc_chars: 2000
 
+finops:
+  enabled: true
+  budget_mode: "off"
+  openai_cheap_model: "gpt-4.1-nano"
+  anthropic_cheap_model: "claude-3-5-haiku-latest"
+

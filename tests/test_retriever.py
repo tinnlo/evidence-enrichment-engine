@@ -231,3 +231,67 @@ class TestHybridRetrieverValidation:
         """Weights that sum to exactly 1.0 are accepted."""
         r = HybridRetriever(**self._base_kwargs(tmp_path), top_k=3, weights=(0.6, 0.3, 0.1))
         assert r.top_k == 3
+
+
+# ---------------------------------------------------------------------------
+# IndexingPartialError regression tests
+# ---------------------------------------------------------------------------
+
+class TestIndexingPartialError:
+    """Regression tests: upsert-failure raises IndexingPartialError with embedded chunks."""
+
+    def test_upsert_failure_raises_indexing_partial_error(self, tmp_path):
+        """When upsert raises, index_document raises IndexingPartialError carrying chunks."""
+        from unittest.mock import MagicMock
+        from evidence_enrichment.core.retrieval.retriever import IndexingPartialError
+
+        store = MagicMock()
+        store.upsert.side_effect = RuntimeError("chroma unavailable")
+        # evict_document must not raise (called during error handling elsewhere)
+        store.evict_document.return_value = None
+
+        embedder = FakeEmbedder()
+        chunker = TableAwareChunker(chunk_size=500, overlap=50, min_size=10)
+        r = HybridRetriever(
+            entity_id="e",
+            store=store,
+            embedder=embedder,  # type: ignore[arg-type]
+            chunker=chunker,
+            top_k=3,
+        )
+
+        doc = _make_doc("https://example.com/a", "word " * 200)
+        with pytest.raises(IndexingPartialError) as exc_info:
+            r.index_document(doc)
+
+        err = exc_info.value
+        assert len(err.embedded_chunks) > 0, "embedded_chunks must be non-empty"
+        assert all(hasattr(c, "content") for c in err.embedded_chunks)
+
+    def test_pre_embed_failure_raises_plain_exception(self, tmp_path):
+        """When chunking raises before embed, a plain exception propagates (no IndexingPartialError)."""
+        from unittest.mock import MagicMock
+        from evidence_enrichment.core.retrieval.retriever import IndexingPartialError
+
+        store = MagicMock()
+        bad_chunker = MagicMock()
+        bad_chunker.chunk.side_effect = ValueError("chunker exploded")
+
+        r = HybridRetriever(
+            entity_id="e",
+            store=store,
+            embedder=FakeEmbedder(),  # type: ignore[arg-type]
+            chunker=bad_chunker,
+            top_k=3,
+        )
+
+        doc = _make_doc("https://example.com/b", "word " * 100)
+        with pytest.raises(ValueError, match="chunker exploded"):
+            r.index_document(doc)
+        # Must NOT be an IndexingPartialError (no embedding happened)
+        try:
+            r.index_document(doc)
+        except IndexingPartialError:
+            pytest.fail("Pre-embed failure should not raise IndexingPartialError")
+        except ValueError:
+            pass  # expected

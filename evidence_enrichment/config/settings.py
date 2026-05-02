@@ -334,6 +334,18 @@ class RetrievalConfig(BaseModel):
     min_doc_chars: int = 2000
 
 
+class FinOpsSettings(BaseModel):
+    """AI FinOps configuration for cost attribution and budget policy."""
+
+    enabled: bool = True
+    budget_mode: str = "off"
+    max_cost_usd_per_run: float | None = None
+    max_cost_usd_per_success: float | None = None
+    openai_cheap_model: str = "gpt-4.1-nano"
+    anthropic_cheap_model: str = "claude-3-5-haiku-latest"
+    pricing_override: dict[str, dict[str, float]] = Field(default_factory=dict)
+
+
 class Settings(BaseModel):
     default_mode: str = "auto"
     replay_dir: str = "examples/replay"
@@ -347,6 +359,7 @@ class Settings(BaseModel):
     thresholds: dict[str, FieldThresholds] = Field(default_factory=dict)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     guardrails: GuardrailsSettings = Field(default_factory=GuardrailsSettings)
+    finops: FinOpsSettings = Field(default_factory=FinOpsSettings)
     observability_backend: str = "langfuse"
     trace_redact_values: bool = True
     openai_api_key: str | None = None

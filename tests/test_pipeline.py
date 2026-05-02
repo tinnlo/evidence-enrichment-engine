@@ -1,6 +1,7 @@
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 import asyncio
+import json
 
 import pytest
 from typer.testing import CliRunner
@@ -75,12 +76,18 @@ def test_context_pack_cli_creates_output(tmp_path: Path) -> None:
 
 def test_eval_cli_creates_report(tmp_path: Path) -> None:
     output = tmp_path / "latest_report.json"
-    result = runner.invoke(app, ["eval", "--output", str(output)])
+    finops_output = tmp_path / "latest_finops_report.json"
+    result = runner.invoke(app, ["eval", "--output", str(output), "--finops-output", str(finops_output)])
     assert result.exit_code == 0
     assert output.exists()
     payload = output.read_text(encoding="utf-8")
     assert '"summary"' in payload
     assert '"total_cases": 6' in payload
+    assert finops_output.exists()
+    finops_payload = json.loads(finops_output.read_text(encoding="utf-8"))
+    assert "summary" in finops_payload
+    assert "cases" in finops_payload
+    assert finops_payload["summary"]["total_cases"] == 6
 
 
 def _make_accepted_doc(url: str, text: str = "some document text") -> ParsedDocument:

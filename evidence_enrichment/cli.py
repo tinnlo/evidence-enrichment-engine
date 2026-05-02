@@ -131,6 +131,10 @@ def demo(
         console.print(
             f"Decision: [bold]{result.decision.value}[/bold] | Confidence: {result.overall_confidence:.2f}"
         )
+        if result.finops_summary:
+            cost = result.finops_summary.get("total_estimated_cost_usd", 0.0)
+            budget = result.finops_summary.get("budget_decision", {}).get("status", "n/a")
+            console.print(f"Estimated cost: [bold]${cost:.6f}[/bold] | Budget: {budget}")
         _print_artifacts(result)
     finally:
         _flush_observability()
@@ -241,15 +245,21 @@ def eval_command(
     output: Path = typer.Option(
         Path("evals/output/latest_report.json"), help="Eval report path."
     ),
+    finops_output: Path = typer.Option(
+        Path("evals/output/latest_finops_report.json"), help="FinOps report path."
+    ),
 ) -> None:
     try:
-        report = run_eval_harness(cases_path=cases, output_path=output)
+        report = run_eval_harness(
+            cases_path=cases, output_path=output, finops_output_path=finops_output,
+        )
         summary = report["summary"]
         console.print(
             f"Eval summary: [bold]{summary['passed']}[/bold]/[bold]{summary['total_cases']}[/bold] passed | "
             f"value_match_rate={summary['value_match_rate']:.2f} | decision_match_rate={summary['decision_match_rate']:.2f}"
         )
         console.print(f"Saved eval report to [bold]{output}[/bold]")
+        console.print(f"Saved FinOps report to [bold]{finops_output}[/bold]")
     finally:
         _flush_observability()
 

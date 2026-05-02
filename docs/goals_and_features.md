@@ -91,6 +91,7 @@ style OUTPUTS fill:transparent,stroke:#e65100,stroke-width:1px,stroke-dasharray:
 | Eval harness | `evidence-enrich eval` checks expected value, expected decision, and minimum confidence on replay cases. | The repo demonstrates repeatable evaluation, not just a happy-path demo. |
 | MCP surface | The MCP server exposes replay-safe tools and resources over stdio or streamable HTTP. | The pipeline can be consumed by AI clients without inventing a separate adapter layer. |
 | Guardrails | Post-synthesis checks can reject low-confidence or invalid outputs before return. | The final answer is gated by policy rather than treated as automatically safe. |
+| AI FinOps | Per-stage cost estimation, budget-aware execution policies, and quality/latency/cost tradeoff reporting. | The workflow measures cost, enforces budgets, and shows tradeoffs in a reproducible way. |
 
 ## Observability Positioning
 

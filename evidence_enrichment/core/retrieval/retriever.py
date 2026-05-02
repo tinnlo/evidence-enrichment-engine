@@ -15,12 +15,13 @@ preserve per-document claim attribution.
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 
 from evidence_enrichment.core.models.contracts import ParsedDocument
 from evidence_enrichment.core.retrieval.chunker import TableAwareChunker
-from evidence_enrichment.core.retrieval.embedder import OpenAIEmbedder
+from evidence_enrichment.core.retrieval.embedder import OpenAIEmbedder, PartialEmbedError
 from evidence_enrichment.core.retrieval.models import Chunk, RetrievalResult
 from evidence_enrichment.core.retrieval.store import ChromaVectorStore
 
@@ -95,6 +96,33 @@ def _table_boost(query: str, chunk: Chunk) -> float:
     return 0.0
 
 
+class IndexingPartialError(Exception):
+    """Raised when embedding succeeded but the vector-store upsert failed.
+
+    Carries the chunks that were embedded (and therefore likely billed) so the
+    caller can accrue accurate FinOps cost without over-charging pre-embed
+    failures.
+    """
+
+    def __init__(self, message: str, embedded_chunks: list["Chunk"]) -> None:
+        super().__init__(message)
+        self.embedded_chunks: list["Chunk"] = embedded_chunks
+
+
+class QueryPartialError(Exception):
+    """Raised when ``embed_query()`` succeeded but a later retrieval step failed.
+
+    The query embedding was billed before the failure (store.query, reranking,
+    etc.) so the caller must accrue the query's char count rather than treating
+    the call as free.  Carries ``query_chars`` (length of the embedded query
+    string) for accurate FinOps accounting.
+    """
+
+    def __init__(self, message: str, query_chars: int) -> None:
+        super().__init__(message)
+        self.query_chars: int = query_chars
+
+
 class HybridRetriever:
     """Orchestrate chunk → embed → store → hybrid-rerank retrieval.
 
@@ -163,9 +191,42 @@ class HybridRetriever:
             self.store.evict_document(self.entity_id, document.url)
             return []
         texts = [c.content for c in chunks]
-        embeddings = self.embedder.embed_texts(texts)
-        self.store.upsert(self.entity_id, chunks, embeddings)
+        try:
+            embeddings = self.embedder.embed_texts(texts)
+        except PartialEmbedError as exc:
+            # Some batches succeeded and were billed; re-raise as IndexingPartialError
+            # carrying only the chunks that were actually embedded so the coordinator
+            # can accrue their exact cost.
+            raise IndexingPartialError(
+                f"embed_texts partial failure for {document.url}: {exc}",
+                embedded_chunks=chunks[: exc.completed_count],
+            ) from exc
+        try:
+            self.store.upsert(self.entity_id, chunks, embeddings)
+        except Exception as exc:
+            raise IndexingPartialError(
+                f"upsert failed for {document.url}: {exc}",
+                embedded_chunks=chunks,
+            ) from exc
         return chunks
+
+    def evict_document(self, document_url: str) -> None:
+        """Remove all indexed chunks for *document_url* from the vector store.
+
+        Safe to call when ``index_document`` fails mid-way (e.g. after
+        ``embed_texts`` succeeds but ``upsert`` raises) to prevent stale
+        vectors from a previous run remaining queryable.
+        """
+        try:
+            self.store.evict_document(self.entity_id, document_url)
+        except Exception:
+            # Best-effort: log and continue — eviction failure must not mask
+            # the original indexing error.
+            logging.warning(
+                "evict_document failed for %s (entity=%s); stale chunks may remain",
+                document_url,
+                self.entity_id,
+            )
 
     # ------------------------------------------------------------------
     # Retrieval
@@ -198,40 +259,50 @@ class HybridRetriever:
         if not query_embedding:
             return []
 
-        # Over-fetch 2x, then rerank
-        raw_hits = self.store.query(
-            entity_id=self.entity_id,
-            query_embedding=query_embedding,
-            top_k=k * 2,
-            where={"document_url": document_url},
-        )
-
-        if not raw_hits:
-            return []
-
-        # Apply hybrid scoring
-        scored: list[RetrievalResult] = []
-        for hit in raw_hits:
-            kw = _keyword_score(query, hit.chunk.content)
-            tb = _table_boost(query, hit.chunk)
-            hybrid = (
-                self.w_vector * hit.vector_score
-                + self.w_keyword * kw
-                + self.w_table * tb
+        # embed_query succeeded — any failure from here on should be surfaced
+        # as QueryPartialError so callers can bill the embedding spend.
+        try:
+            # Over-fetch 2x, then rerank
+            raw_hits = self.store.query(
+                entity_id=self.entity_id,
+                query_embedding=query_embedding,
+                top_k=k * 2,
+                where={"document_url": document_url},
             )
-            scored.append(
-                RetrievalResult(
-                    chunk=hit.chunk,
-                    score=hybrid,
-                    vector_score=hit.vector_score,
-                    keyword_score=kw,
-                    is_table_boost=tb > 0,
+
+            if not raw_hits:
+                return []
+
+            # Apply hybrid scoring
+            scored: list[RetrievalResult] = []
+            for hit in raw_hits:
+                kw = _keyword_score(query, hit.chunk.content)
+                tb = _table_boost(query, hit.chunk)
+                hybrid = (
+                    self.w_vector * hit.vector_score
+                    + self.w_keyword * kw
+                    + self.w_table * tb
                 )
-            )
+                scored.append(
+                    RetrievalResult(
+                        chunk=hit.chunk,
+                        score=hybrid,
+                        vector_score=hit.vector_score,
+                        keyword_score=kw,
+                        is_table_boost=tb > 0,
+                    )
+                )
 
-        # Sort descending by final score, return top_k
-        scored.sort(key=lambda r: r.score, reverse=True)
-        for i, r in enumerate(scored):
-            r.rank = i + 1
+            # Sort descending by final score, return top_k
+            scored.sort(key=lambda r: r.score, reverse=True)
+            for i, r in enumerate(scored):
+                r.rank = i + 1
 
-        return scored[:k]
+            return scored[:k]
+        except QueryPartialError:
+            raise
+        except Exception as exc:
+            raise QueryPartialError(
+                f"retrieve failed after embed_query for {document_url}: {exc}",
+                query_chars=len(query),
+            ) from exc

@@ -6,7 +6,13 @@ All tests use a stub ``HybridRetriever`` to avoid Chroma/OpenAI dependencies.
 from __future__ import annotations
 
 import pytest
+from unittest.mock import patch
 
+from evidence_enrichment.core.retrieval.agent import (
+    RetrievalAgent,
+    RetrievalMetrics,
+    RetrievalPartialError,
+)
 from evidence_enrichment.core.retrieval.models import Chunk, RetrievalResult
 
 # ---------------------------------------------------------------------------
@@ -89,11 +95,15 @@ class TestRetrievalAgentHappyPath:
         stub = StubRetriever(results_per_call=[high_score_results])
         agent = RetrievalAgent(stub, max_iterations=3)
 
-        results = agent.retrieve("headquarters location", "https://example.com/doc")
+        results, metrics = agent.retrieve_with_metrics("headquarters location", "https://example.com/doc")
 
         assert results == high_score_results
         assert agent.last_iterations == 1
         assert stub.retrieve_call_count == 1
+        assert isinstance(metrics, RetrievalMetrics)
+        assert metrics.iterations == 1
+        assert metrics.total_query_chars == len("headquarters location")
+        assert metrics.query_char_history == [len("headquarters location")]
 
     def test_entity_id_proxied_from_inner(self):
         stub = StubRetriever(entity_id="test-entity")
@@ -110,12 +120,13 @@ class TestRetrievalAgentRefinement:
         stub = StubRetriever(results_per_call=[low_results, high_results])
         agent = RetrievalAgent(stub, max_iterations=3)
 
-        results = agent.retrieve("hq country", "https://example.com/doc")
+        results, metrics = agent.retrieve_with_metrics("hq country", "https://example.com/doc")
 
         # Should have iterated twice (first low, then high)
         assert agent.last_iterations == 2
         assert stub.retrieve_call_count == 2
         assert results == high_results
+        assert metrics.iterations == 2
 
     def test_stops_at_max_iterations(self):
         always_low = [_make_result(0.05)]
@@ -124,18 +135,189 @@ class TestRetrievalAgentRefinement:
         )
         agent = RetrievalAgent(stub, max_iterations=2)
 
-        results = agent.retrieve("country", "https://example.com/doc")
+        results, metrics = agent.retrieve_with_metrics("country", "https://example.com/doc")
 
         # Capped at max_iterations=2
         assert agent.last_iterations == 2
         assert stub.retrieve_call_count == 2
         assert results == always_low
+        assert metrics.iterations == 2
 
     def test_empty_results_do_not_raise(self):
         stub = StubRetriever(results_per_call=[[], []])
         agent = RetrievalAgent(stub, max_iterations=2)
 
-        results = agent.retrieve("query", "https://example.com/doc")
+        results, metrics = agent.retrieve_with_metrics("query", "https://example.com/doc")
 
         assert results == []
         assert agent.last_iterations == 2
+        assert metrics.iterations == 2
+
+    def test_returns_best_scored_pass_not_final_degraded_pass(self):
+        """Agent returns the highest-scored pass even when later refinements degrade quality."""
+        # All scores below 0.40 threshold so the agent runs to the iteration cap.
+        best_results = [_make_result(0.35), _make_result(0.30)]  # iter 1 — best
+        mid_results  = [_make_result(0.20)]                       # iter 2 — worse
+        bad_results  = [_make_result(0.05)]                       # iter 3 — worst (cap hit)
+        stub = StubRetriever(results_per_call=[best_results, mid_results, bad_results])
+        agent = RetrievalAgent(stub, max_iterations=3)
+
+        results, metrics = agent.retrieve_with_metrics("founding year", "https://example.com/doc")
+
+        # best_results (iter 1, highest score) should be returned, not bad_results.
+        assert results == best_results, (
+            "expected best-scored pass (iter 1) but got the degraded final pass"
+        )
+        assert metrics.iterations == 3
+
+
+class TestRetrievalAgentPartialError:
+    """Agent raises RetrievalPartialError with exact history on mid-graph failures."""
+
+    def test_evaluate_failure_after_first_retrieve_carries_exact_history(self):
+        """score_chunks failing on iteration 2 must report iteration-1 history, not [len(query)]."""
+        query = "hq country"
+        low_results = [_make_result(0.1)]
+        high_results = [_make_result(0.9)]
+        stub = StubRetriever(results_per_call=[low_results, high_results])
+        agent = RetrievalAgent(stub, max_iterations=3)
+
+        call_count = 0
+
+        def _fail_on_second_call(results, query_text):
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 2:
+                raise RuntimeError("score_chunks boom")
+            from evidence_enrichment.core.retrieval.evaluator import score_chunks as _real
+            return _real(results, query_text)
+
+        with patch(
+            "evidence_enrichment.core.retrieval.agent.score_chunks",
+            side_effect=_fail_on_second_call,
+        ):
+            with pytest.raises(RetrievalPartialError) as exc_info:
+                agent.retrieve(query, "https://example.com/doc")
+
+        err = exc_info.value
+        # Two retrieve nodes ran; second evaluate raised — history must have 2 entries.
+        assert len(err.partial_metrics.query_char_history) == 2, (
+            "expected 2 entries in query_char_history (one per completed retrieve node)"
+        )
+        assert err.partial_metrics.total_query_chars == sum(
+            err.partial_metrics.query_char_history
+        )
+        # The second evaluate never completed so best_results is from iteration 1
+        # (low_results, the only confirmed scored pass).
+        assert err.partial_results == low_results
+
+    def test_refine_failure_carries_exact_history_and_prior_results(self):
+        """refine_query failing after the first evaluate must carry iteration-1 state."""
+        query = "revenue"
+        low_results = [_make_result(0.15)]
+        stub = StubRetriever(results_per_call=[low_results, low_results])
+        agent = RetrievalAgent(stub, max_iterations=3)
+
+        with patch(
+            "evidence_enrichment.core.retrieval.agent.refine_query",
+            side_effect=RuntimeError("refine boom"),
+        ):
+            with pytest.raises(RetrievalPartialError) as exc_info:
+                agent.retrieve(query, "https://example.com/doc")
+
+        err = exc_info.value
+        # One retrieve ran before refine_query failed.
+        assert len(err.partial_metrics.query_char_history) == 1
+        assert err.partial_metrics.query_char_history[0] == len(query)
+        assert err.partial_results == low_results
+
+    def test_first_retrieve_failure_carries_no_phantom_cost(self):
+        """inner.retrieve() failing on the very first URL accrues zero query chars.
+
+        We cannot distinguish pre-embed from post-embed failures in the inner
+        retriever, but with no accumulated hits the safest assumption is that
+        embed_query may not have run — so no query chars are billed.
+        """
+        query = "founded year"
+        stub = StubRetriever()
+        stub.retrieve = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("db down"))  # type: ignore[method-assign]
+        agent = RetrievalAgent(stub, max_iterations=3)
+
+        with pytest.raises(RetrievalPartialError) as exc_info:
+            agent.retrieve(query, "https://example.com/doc")
+
+        err = exc_info.value
+        assert err.partial_metrics.query_char_history == []
+        assert err.partial_results == []
+
+    def test_query_partial_error_from_inner_bills_query_chars_on_first_url(self):
+        """QueryPartialError from inner.retrieve() bills query_chars even for first URL.
+
+        embed_query succeeded inside HybridRetriever before the store.query failed,
+        so _make_retrieve_node must include query chars regardless of successful_calls.
+        """
+        from evidence_enrichment.core.retrieval.retriever import QueryPartialError
+
+        query = "founded year"
+        qchars = len(query)
+
+        def _raise_query_partial(q, document_url, top_k=None):
+            raise QueryPartialError("store.query exploded", query_chars=qchars)
+
+        stub = StubRetriever()
+        stub.retrieve = _raise_query_partial  # type: ignore[method-assign]
+        agent = RetrievalAgent(stub, max_iterations=3)
+
+        with pytest.raises(RetrievalPartialError) as exc_info:
+            agent.retrieve(query, "https://example.com/doc")
+
+        err = exc_info.value
+        # embed_query ran (QueryPartialError carries confirmed query_chars),
+        # so history must include them even though successful_calls == 0.
+        assert err.partial_metrics.query_char_history == [qchars]
+        assert err.partial_results == []
+
+    def test_retrieve_node_bills_query_chars_when_prior_url_call_succeeded(self):
+        """_retrieve_node bills query chars whenever any prior URL call returned.
+
+        Even if the successful call returned zero hits, successful_calls > 0
+        means embed_query ran — so the failing iteration's chars must appear
+        in query_char_history.
+        """
+        from evidence_enrichment.core.retrieval.agent import _RetrieveNodeError
+
+        query = "employee count"
+        call_count = 0
+
+        def _succeed_then_fail(q, document_url, top_k=None):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return []  # first URL: successful call, zero hits
+            raise RuntimeError("second URL db down")
+
+        stub = StubRetriever()
+        stub.retrieve = _succeed_then_fail  # type: ignore[method-assign]
+        agent = RetrievalAgent(stub, max_iterations=3)
+
+        # Build the retrieve node directly (bypassing the full graph).
+        snapshot = {"query_char_history": [], "best_results": [], "best_score": -1.0}
+        retrieve_node = agent._make_retrieve_node(snapshot)
+
+        state = {
+            "query": query,
+            "document_urls": ["https://example.com/doc1", "https://example.com/doc2"],
+            "top_k": 5,
+            "results": [],
+            "score": 0.0,
+            "iteration": 0,
+            "query_char_history": [],
+        }
+
+        with pytest.raises(_RetrieveNodeError) as exc_info:
+            retrieve_node(state)
+
+        err = exc_info.value
+        # successful_calls == 1 (first URL returned before second raised), so
+        # query_chars must be included.
+        assert err.query_char_history == [len(query)]

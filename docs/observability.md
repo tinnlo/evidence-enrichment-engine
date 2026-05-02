@@ -248,3 +248,85 @@ Recommended usage:
 2. Inspect the local trace directory under `examples/output/traces/<trace_id>/`.
 3. If a remote backend is active, open the corresponding Langfuse or LangSmith run tree.
 4. Compare the compact remote stage summaries with the richer local artifacts on disk.
+
+## AI FinOps Observability
+
+The pipeline includes a built-in AI FinOps layer that measures estimated cost, enforces budgets, and reports quality/latency/cost tradeoffs alongside the standard trace artifacts.
+
+### What Is Measured
+
+Per-stage cost metrics for all model-backed stages:
+
+- `analysis` — LLM call cost
+- `synthesis` — LLM call cost
+- `retrieval_indexing` — embedding cost (when retrieval is active)
+- `retrieval_query` — embedding cost (when retrieval is active)
+
+Each stage records:
+
+| Field | Description |
+|---|---|
+| `model_name` | The model used |
+| `estimated_input_tokens` | Heuristic `ceil(chars / 4)` |
+| `estimated_output_tokens` | Heuristic from output payload |
+| `estimated_cost_usd` | Calculated from the pricing catalog |
+| `usage_source` | Currently always `estimated`; `provider_reported` reserved for future use |
+
+### How Cost Is Estimated
+
+Costs are **estimated**, not provider billing truth. The estimation approach:
+
+1. Token counts use a deterministic `chars / 4` heuristic matching the convention in `context/resolver.py`.
+2. A static pricing catalog (`evidence_enrichment/finops/pricing.py`) maps model names to per-million-token prices.
+3. The catalog is versioned and recorded in artifacts so reports are reproducible.
+4. All costs are estimates; provider-reported usage data is not yet wired in.
+
+### Budget Modes
+
+Configured via `finops.budget_mode` in `evidence_enrichment.yaml`:
+
+| Mode | Behavior |
+|---|---|
+| `off` | Collect metrics only. No enforcement. |
+| `warn` | Collect metrics and flag budget breaches in outputs. |
+| `strict` | Attempt downgrade before blocking. |
+
+In `strict` mode, the downgrade sequence is:
+
+1. Disable retrieval if it is active and optional.
+2. Switch to a cheaper model within the same provider family (same-provider tiering).
+3. Block with a structured budget-rejected result if still over budget.
+
+Budget-blocked runs return a normal `PipelineRunResult` with `decision=auto_reject` and a budget-specific `gate_reason`.
+
+### FinOps Artifacts
+
+Every run with FinOps enabled writes an additional artifact:
+
+- `finops_summary.json` — per-run cost summary, budget decision, pricing catalog version
+
+The eval harness also produces:
+
+- `evals/output/latest_finops_report.json` — per-case cost, latency, decision, confidence, budget outcome, and aggregate cost totals
+
+### Configuring FinOps
+
+```yaml
+# evidence_enrichment.yaml
+finops:
+  enabled: true
+  budget_mode: "off"           # off | warn | strict
+  max_cost_usd_per_run: null   # optional budget cap
+  max_cost_usd_per_success: null
+  openai_cheap_model: "gpt-4.1-nano"
+  anthropic_cheap_model: "claude-3-5-haiku-latest"
+  pricing_override: {}         # optional per-model price overrides
+```
+
+### Viewing Cost Data
+
+1. Run `evidence-enrich demo --mode replay`.
+2. Inspect `finops_summary.json` in the trace directory.
+3. Check `spans.jsonl` for per-stage cost fields.
+4. Run `evidence-enrich eval` and inspect `evals/output/latest_finops_report.json`.
+5. If Langfuse is active, cost fields are included in span attributes.

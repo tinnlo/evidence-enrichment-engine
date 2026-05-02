@@ -11,6 +11,7 @@
 | Explicit evidence pipeline | Query planning, search, fetch, parse, assessment, analysis, synthesis, and review are separate stages with local traces. |
 | Optional LangGraph retrieval path | Retrieval can stay off, run as local RAG, or run as a stateful retrieve-evaluate-refine loop without changing the base artifact contract. |
 | Langfuse-first observability | `OBSERVABILITY_BACKEND` routes traces to Langfuse, LangSmith, both, or neither while local artifacts remain on by default. |
+| AI FinOps for agentic workflows | Per-stage cost estimation, budget-aware execution, and quality/latency/cost tradeoff reporting — all deterministic and replay-friendly. |
 | MCP surface | MCP-compatible clients can invoke the replay-safe workflow without inventing a second integration layer. |
 
 ## Architecture At A Glance
@@ -146,6 +147,29 @@ Privacy note:
 - With the default `TRACE_REDACT_VALUES=true`, LangSmith client wrapping is disabled and sensitive summary fields are redacted before leaving the process.
 
 See [docs/observability.md](docs/observability.md) for backend setup, redaction rules, credential eviction, and process-global caveats.
+
+## AI FinOps
+
+The pipeline includes cost-aware model routing and budget-aware execution so every run produces machine-readable cost attribution alongside quality and latency metrics.
+
+Key capabilities:
+
+- **Stage-level cost attribution**: analysis, synthesis, and retrieval embedding costs are estimated per-run.
+- **Budget-aware execution**: `budget_mode=off|warn|strict` controls whether runs are measured, flagged, or actively governed.
+- **Same-provider tiered routing**: strict mode can downgrade to a cheaper model within the same provider before blocking.
+- **Deterministic estimation**: all cost numbers use a reproducible `chars/4` token heuristic and a versioned static pricing catalog — not provider billing.
+- **FinOps eval report**: `evidence-enrich eval` produces `evals/output/latest_finops_report.json` with per-case and aggregate cost/latency/quality data.
+
+```yaml
+# evidence_enrichment.yaml
+finops:
+  enabled: true
+  budget_mode: "off"
+  openai_cheap_model: "gpt-4.1-nano"
+  anthropic_cheap_model: "claude-3-5-haiku-latest"
+```
+
+Costs are **estimated**, not billed. See [docs/observability.md](docs/observability.md) for details.
 
 ## Retrieval And LangGraph
 

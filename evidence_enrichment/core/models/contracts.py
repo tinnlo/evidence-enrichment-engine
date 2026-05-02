@@ -14,6 +14,7 @@ from evidence_enrichment.core.models.enums import (
     ReviewDecision,
     SourceType,
 )
+from evidence_enrichment.finops.models import LLMUsage
 from evidence_enrichment.guardrails.models import GuardrailsReport
 
 
@@ -130,6 +131,7 @@ class AnalysisReport(BaseModel):
     provider: ProviderType
     claims: list[FactClaim] = Field(default_factory=list)
     reasoning: str | None = None
+    llm_usage: LLMUsage | None = None
 
 
 class ConflictManifest(BaseModel):
@@ -147,6 +149,7 @@ class SynthesisResult(BaseModel):
     synthesis_confidence: float
     supporting_urls: list[str] = Field(default_factory=list)
     conflicts: list[ConflictManifest] = Field(default_factory=list)
+    llm_usage: LLMUsage | None = None
 
     @field_validator("synthesis_confidence", mode="after")
     @classmethod
@@ -223,3 +226,4 @@ class PipelineRunResult(BaseModel):
     fallback_from_live: bool = False
     retrieval_degraded: bool = False
     guardrails_report: GuardrailsReport | None = None
+    finops_summary: dict[str, Any] | None = None

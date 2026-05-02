@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from evidence_enrichment.core.models.contracts import AnalysisReport, ConflictManifest, FactClaim, ParsedDocument, SynthesisResult
 from evidence_enrichment.core.models.enums import ProviderType
 from evidence_enrichment.core.providers.base import AnalysisAgent, SynthesisAgent
+from evidence_enrichment.finops.models import LLMUsage, UsageSource
 from evidence_enrichment.observability.langsmith import _should_redact
 from evidence_enrichment.observability.router import langsmith_tracing_ready
 
@@ -17,7 +18,17 @@ if TYPE_CHECKING:
 
 
 class ProviderParseError(RuntimeError):
-    """Raised when a provider returns unparseable JSON."""
+    """Raised when a provider returns unparseable JSON.
+
+    ``llm_usage`` carries token counts from the API response that preceded the
+    parse failure.  The provider was paid for the call even though the response
+    could not be decoded, so cost must still be attributed.  ``None`` when the
+    error occurred before the API responded (should not happen in practice).
+    """
+
+    def __init__(self, message: str, llm_usage: "LLMUsage | None" = None) -> None:
+        super().__init__(message)
+        self.llm_usage = llm_usage
 
 
 def _extract_json(text: str) -> dict:
@@ -118,29 +129,47 @@ class OpenAIAnalysisAgent(AnalysisAgent):
         )
         client = _wrap_openai_client(AsyncOpenAI(api_key=self.api_key))
         response = await client.responses.create(model=self.model, input=prompt)
-        parsed = _extract_json(response.output_text)
-        claims = [
-            FactClaim(
-                field_name=field_name,
-                candidate_value=str(row.get("candidate_value") or ""),
-                supporting_excerpt=str(row.get("supporting_excerpt") or "")[:400],
-                source_url=document.url,
-                source_title=document.title,
-                analysis_confidence=float(row.get("analysis_confidence") or 0.5),
-                source_authority_score=document.source_authority_score,
-                freshness_score=document.freshness_score,
-                entity_match_score=document.entity_match_score,
-                supporting_chunk_ids=chunk_ids,
+        # Capture usage BEFORE parsing so parse failures still carry cost.
+        if response.usage is not None:
+            llm_usage = LLMUsage(
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+                usage_source=UsageSource.PROVIDER_REPORTED,
             )
-            for row in parsed.get("claims", [])
-            if row.get("candidate_value")
-        ]
-        return AnalysisReport(
-            source_url=document.url,
-            provider=self.provider_type,
-            claims=claims,
-            reasoning=str(parsed.get("reasoning") or ""),
-        )
+        else:
+            from evidence_enrichment.finops.estimation import estimate_tokens
+            llm_usage = LLMUsage(
+                input_tokens=estimate_tokens(prompt),
+                output_tokens=estimate_tokens(response.output_text),
+                usage_source=UsageSource.ESTIMATED,
+            )
+        try:
+            parsed = _extract_json(response.output_text)
+            claims = [
+                FactClaim(
+                    field_name=field_name,
+                    candidate_value=str(row.get("candidate_value") or ""),
+                    supporting_excerpt=str(row.get("supporting_excerpt") or "")[:400],
+                    source_url=document.url,
+                    source_title=document.title,
+                    analysis_confidence=float(row.get("analysis_confidence") or 0.5),
+                    source_authority_score=document.source_authority_score,
+                    freshness_score=document.freshness_score,
+                    entity_match_score=document.entity_match_score,
+                    supporting_chunk_ids=chunk_ids,
+                )
+                for row in parsed.get("claims", [])
+                if row.get("candidate_value")
+            ]
+            return AnalysisReport(
+                source_url=document.url,
+                provider=self.provider_type,
+                claims=claims,
+                reasoning=str(parsed.get("reasoning") or ""),
+                llm_usage=llm_usage,
+            )
+        except Exception as exc:
+            raise ProviderParseError(str(exc), llm_usage=llm_usage) from exc
 
 
 class AnthropicAnalysisAgent(AnalysisAgent):
@@ -183,29 +212,39 @@ class AnthropicAnalysisAgent(AnalysisAgent):
             messages=[{"role": "user", "content": prompt}],
         )
         text = "".join(block.text for block in response.content if getattr(block, "text", None))
-        parsed = _extract_json(text)
-        claims = [
-            FactClaim(
-                field_name=field_name,
-                candidate_value=str(row.get("candidate_value") or ""),
-                supporting_excerpt=str(row.get("supporting_excerpt") or "")[:400],
-                source_url=document.url,
-                source_title=document.title,
-                analysis_confidence=float(row.get("analysis_confidence") or 0.5),
-                source_authority_score=document.source_authority_score,
-                freshness_score=document.freshness_score,
-                entity_match_score=document.entity_match_score,
-                supporting_chunk_ids=chunk_ids,
-            )
-            for row in parsed.get("claims", [])
-            if row.get("candidate_value")
-        ]
-        return AnalysisReport(
-            source_url=document.url,
-            provider=self.provider_type,
-            claims=claims,
-            reasoning=str(parsed.get("reasoning") or ""),
+        # Capture usage BEFORE parsing so parse failures still carry cost.
+        llm_usage = LLMUsage(
+            input_tokens=response.usage.input_tokens,
+            output_tokens=response.usage.output_tokens,
+            usage_source=UsageSource.PROVIDER_REPORTED,
         )
+        try:
+            parsed = _extract_json(text)
+            claims = [
+                FactClaim(
+                    field_name=field_name,
+                    candidate_value=str(row.get("candidate_value") or ""),
+                    supporting_excerpt=str(row.get("supporting_excerpt") or "")[:400],
+                    source_url=document.url,
+                    source_title=document.title,
+                    analysis_confidence=float(row.get("analysis_confidence") or 0.5),
+                    source_authority_score=document.source_authority_score,
+                    freshness_score=document.freshness_score,
+                    entity_match_score=document.entity_match_score,
+                    supporting_chunk_ids=chunk_ids,
+                )
+                for row in parsed.get("claims", [])
+                if row.get("candidate_value")
+            ]
+            return AnalysisReport(
+                source_url=document.url,
+                provider=self.provider_type,
+                claims=claims,
+                reasoning=str(parsed.get("reasoning") or ""),
+                llm_usage=llm_usage,
+            )
+        except Exception as exc:
+            raise ProviderParseError(str(exc), llm_usage=llm_usage) from exc
 
 
 class OpenAISynthesisAgent(SynthesisAgent):
@@ -235,16 +274,34 @@ class OpenAISynthesisAgent(SynthesisAgent):
         )
         client = _wrap_openai_client(AsyncOpenAI(api_key=self.api_key))
         response = await client.responses.create(model=self.model, input=prompt)
-        parsed = _extract_json(response.output_text)
-        return SynthesisResult(
-            field_name=field_name,
-            value=str(parsed.get("value") or "") or None,
-            normalized_value=str(parsed.get("normalized_value") or "") or None,
-            reasoning=str(parsed.get("reasoning") or ""),
-            synthesis_confidence=float(parsed.get("synthesis_confidence") or 0.5),
-            supporting_urls=[claim.source_url for claim in claims],
-            conflicts=_build_conflicts(field_name, claims),
-        )
+        # Capture usage BEFORE parsing so parse failures still carry cost.
+        if response.usage is not None:
+            llm_usage = LLMUsage(
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+                usage_source=UsageSource.PROVIDER_REPORTED,
+            )
+        else:
+            from evidence_enrichment.finops.estimation import estimate_tokens
+            llm_usage = LLMUsage(
+                input_tokens=estimate_tokens(prompt),
+                output_tokens=estimate_tokens(response.output_text),
+                usage_source=UsageSource.ESTIMATED,
+            )
+        try:
+            parsed = _extract_json(response.output_text)
+            return SynthesisResult(
+                field_name=field_name,
+                value=str(parsed.get("value") or "") or None,
+                normalized_value=str(parsed.get("normalized_value") or "") or None,
+                reasoning=str(parsed.get("reasoning") or ""),
+                synthesis_confidence=float(parsed.get("synthesis_confidence") or 0.5),
+                supporting_urls=[claim.source_url for claim in claims],
+                conflicts=_build_conflicts(field_name, claims),
+                llm_usage=llm_usage,
+            )
+        except Exception as exc:
+            raise ProviderParseError(str(exc), llm_usage=llm_usage) from exc
 
 
 class AnthropicSynthesisAgent(SynthesisAgent):
@@ -279,16 +336,26 @@ class AnthropicSynthesisAgent(SynthesisAgent):
             messages=[{"role": "user", "content": prompt}],
         )
         text = "".join(block.text for block in response.content if getattr(block, "text", None))
-        parsed = _extract_json(text)
-        return SynthesisResult(
-            field_name=field_name,
-            value=str(parsed.get("value") or "") or None,
-            normalized_value=str(parsed.get("normalized_value") or "") or None,
-            reasoning=str(parsed.get("reasoning") or ""),
-            synthesis_confidence=float(parsed.get("synthesis_confidence") or 0.5),
-            supporting_urls=[claim.source_url for claim in claims],
-            conflicts=_build_conflicts(field_name, claims),
+        # Capture usage BEFORE parsing so parse failures still carry cost.
+        llm_usage = LLMUsage(
+            input_tokens=response.usage.input_tokens,
+            output_tokens=response.usage.output_tokens,
+            usage_source=UsageSource.PROVIDER_REPORTED,
         )
+        try:
+            parsed = _extract_json(text)
+            return SynthesisResult(
+                field_name=field_name,
+                value=str(parsed.get("value") or "") or None,
+                normalized_value=str(parsed.get("normalized_value") or "") or None,
+                reasoning=str(parsed.get("reasoning") or ""),
+                synthesis_confidence=float(parsed.get("synthesis_confidence") or 0.5),
+                supporting_urls=[claim.source_url for claim in claims],
+                conflicts=_build_conflicts(field_name, claims),
+                llm_usage=llm_usage,
+            )
+        except Exception as exc:
+            raise ProviderParseError(str(exc), llm_usage=llm_usage) from exc
 
 
 def _build_conflicts(field_name: str, claims: list[FactClaim]) -> list[ConflictManifest]:

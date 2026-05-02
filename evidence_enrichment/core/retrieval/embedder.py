@@ -10,6 +10,26 @@ from __future__ import annotations
 import os
 
 
+class PartialEmbedError(Exception):
+    """Raised when ``embed_texts()`` fails partway through a multi-batch call.
+
+    Carries the embeddings that were successfully returned before the failure
+    (``completed_embeddings``) and the number of input texts they correspond to
+    (``completed_count``), so callers can accrue accurate FinOps cost for the
+    already-billed API calls rather than treating the whole call as free.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        completed_embeddings: list[list[float]],
+        completed_count: int,
+    ) -> None:
+        super().__init__(message)
+        self.completed_embeddings: list[list[float]] = completed_embeddings
+        self.completed_count: int = completed_count
+
+
 class OpenAIEmbedder:
     """Batch-aware OpenAI embedder.
 
@@ -57,14 +77,32 @@ class OpenAIEmbedder:
         return self._client
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """Embed a list of texts, batching as needed."""
+        """Embed a list of texts, batching as needed.
+
+        Raises
+        ------
+        PartialEmbedError
+            If a batch after the first fails, carrying already-completed
+            embeddings so callers can bill them accurately.
+        """
         if not texts:
             return []
         client = self._get_client()
         all_embeddings: list[list[float]] = []
         for i in range(0, len(texts), self.batch_size):
             batch = texts[i : i + self.batch_size]
-            response = client.embeddings.create(model=self.model, input=batch)  # type: ignore[union-attr]
+            try:
+                response = client.embeddings.create(model=self.model, input=batch)  # type: ignore[union-attr]
+            except Exception as exc:
+                if all_embeddings:
+                    # At least one batch already succeeded and was billed.
+                    raise PartialEmbedError(
+                        f"embed_texts failed at batch starting index {i}: {exc}",
+                        completed_embeddings=all_embeddings,
+                        completed_count=len(all_embeddings),
+                    ) from exc
+                # First batch failed — no embeddings were billed; re-raise as-is.
+                raise
             batch_embeddings = [item.embedding for item in sorted(response.data, key=lambda x: x.index)]
             all_embeddings.extend(batch_embeddings)
         return all_embeddings
