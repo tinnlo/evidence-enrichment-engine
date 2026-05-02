@@ -82,6 +82,8 @@ Every run writes:
 - `trace_timeline.md`
 - `openinference_trace.json`
 - `resolved_context.json`
+- `finops_summary.json` (when FinOps is enabled)
+- `execution_policy.json` (always written; empty `decisions` list in `off` mode)
 
 These files live under `examples/output/traces/<trace_id>/` and remain the stable local contract regardless of remote backend selection.
 
@@ -341,8 +343,8 @@ The execution policy layer governs *capability* — which live-network surfaces 
 
 | Mode | Behaviour |
 |------|-----------|
-| `off` (default) | All actions pass through; nothing is recorded. |
-| `audit` | All actions pass through; violations (actions outside `allowed_actions`) are recorded in the policy report. |
+| `off` (default) | All actions pass through. `execution_policy.json` is still written with an empty `decisions` list so consumers can distinguish "policy off" from "not configured". |
+| `audit` | All actions pass through; violations (actions outside `allowed_actions`) are recorded in the policy report without blocking the run. |
 | `enforce` | Actions outside `allowed_actions` are blocked; the pipeline returns a structured result with a `gate_reason` set. |
 
 ### Governed Actions
@@ -362,18 +364,33 @@ The replay path never reaches any live-capability gate. Running with `mode="enfo
 
 ### Policy Artifacts
 
-Every run writes an `execution_policy.json` artifact alongside `finops_summary.json` in the per-run UUID directory:
+Every run writes an `execution_policy.json` artifact alongside `finops_summary.json` in the per-run UUID directory. The file is always written, regardless of mode:
 
 ```json
 {
-  "mode": "audit",
-  "decisions": [ ... ],
-  "blocked_actions": [],
-  "violations": [ ... ]
+  "mode": "enforce",
+  "decisions": [
+    {
+      "action": "search",
+      "allowed": true,
+      "mode": "enforce",
+      "reason": "allowed",
+      "timestamp": "2026-05-02T17:00:00.000000+00:00"
+    },
+    {
+      "action": "remote_tracing",
+      "allowed": false,
+      "mode": "enforce",
+      "reason": "policy_blocked:remote_tracing",
+      "timestamp": "2026-05-02T17:00:01.000000+00:00"
+    }
+  ],
+  "blocked_actions": ["remote_tracing"],
+  "violations": []
 }
 ```
 
-In `off` mode the file still exists with an empty `decisions` list so consumers can distinguish "policy off" from "not configured".
+In `off` mode the file exists with `decisions: []` and `blocked_actions: []`. In `audit` mode, blocked actions are recorded in `violations` but not in `blocked_actions` (the run is not blocked). In `enforce` mode, blocked actions appear in both `blocked_actions` and `violations`.
 
 ### Configuring Execution Policy
 

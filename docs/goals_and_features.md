@@ -125,6 +125,8 @@ See [retrieval.md](retrieval.md) for chunking, scoring, config, and the LangGrap
 | `tests/test_pipeline.py` | End-to-end pipeline behavior and artifact generation |
 | `tests/test_retrieval_agent.py` | Retrieval-agent orchestration and replay boundaries |
 | `tests/test_mcp_server.py` | MCP tools, resources, and transport-safe defaults |
+| `tests/test_execution_policy.py` | Policy models, engine (all three modes), config surface, `execution_policy.json` artifact, coordinator smoke paths, and remote-tracing policy gate |
+| `tests/test_agents.py` | Live agent LLM usage capture (provider-reported and estimated fallback) |
 | `tests/` | Full local regression suite exercised by CI |
 | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) | Installs `.[dev]`, runs `pytest tests/`, then `ruff check .` |
 
