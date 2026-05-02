@@ -59,6 +59,7 @@ class TraceArtifacts:
     timeline_path: Path
     openinference_path: Path
     finops_summary_path: Path | None = None
+    execution_policy_path: Path | None = None
 
     def as_refs(self) -> dict[str, str]:
         refs = {
@@ -70,6 +71,8 @@ class TraceArtifacts:
         }
         if self.finops_summary_path is not None:
             refs["finops_summary"] = str(self.finops_summary_path)
+        if self.execution_policy_path is not None:
+            refs["execution_policy"] = str(self.execution_policy_path)
         return refs
 
 
@@ -130,7 +133,7 @@ class LocalTracer:
                 )
             )
 
-    def write(self, root: Path, finops_data: dict | None = None) -> TraceArtifacts:
+    def write(self, root: Path, finops_data: dict | None = None, execution_policy_data: dict | None = None) -> TraceArtifacts:
         trace_dir = root / self.trace_id
         trace_dir.mkdir(parents=True, exist_ok=True)
         spans_path = trace_dir / "spans.jsonl"
@@ -217,6 +220,14 @@ class LocalTracer:
                 encoding="utf-8",
             )
 
+        execution_policy_path: Path | None = None
+        if execution_policy_data is not None:
+            execution_policy_path = trace_dir / "execution_policy.json"
+            execution_policy_path.write_text(
+                json.dumps(execution_policy_data, indent=2, default=str),
+                encoding="utf-8",
+            )
+
         return TraceArtifacts(
             trace_dir=trace_dir,
             spans_path=spans_path,
@@ -224,4 +235,5 @@ class LocalTracer:
             timeline_path=timeline_path,
             openinference_path=openinference_path,
             finops_summary_path=finops_summary_path,
+            execution_policy_path=execution_policy_path,
         )

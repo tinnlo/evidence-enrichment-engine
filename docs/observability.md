@@ -330,3 +330,63 @@ finops:
 3. Check `spans.jsonl` for per-stage cost fields.
 4. Run `evidence-enrich eval` and inspect `evals/output/latest_finops_report.json`.
 5. If Langfuse is active, cost fields are included in span attributes.
+
+---
+
+## Execution Policy
+
+The execution policy layer governs *capability* — which live-network surfaces the agent is permitted to use at runtime. It is independent of FinOps (cost) and observability (tracing).
+
+### Policy Modes
+
+| Mode | Behaviour |
+|------|-----------|
+| `off` (default) | All actions pass through; nothing is recorded. |
+| `audit` | All actions pass through; violations (actions outside `allowed_actions`) are recorded in the policy report. |
+| `enforce` | Actions outside `allowed_actions` are blocked; the pipeline returns a structured result with a `gate_reason` set. |
+
+### Governed Actions
+
+| Action | When it fires |
+|--------|--------------|
+| `live_provider_calls` | Top-level gate at the start of every live run. |
+| `search` | Before each search provider call. |
+| `fetch` | Before each document fetch. |
+| `retrieval` | Before the retrieval indexing/query block. |
+| `remote_tracing` | Before activating a remote observability backend. |
+| `mcp_live_runs` | At the MCP server boundary for non-replay tool calls. |
+
+### Replay Safety
+
+The replay path never reaches any live-capability gate. Running with `mode="enforce"` and an empty `allowed_actions` list will still succeed in replay mode and produce a `blocked_actions: []` report.
+
+### Policy Artifacts
+
+Every run writes an `execution_policy.json` artifact alongside `finops_summary.json` in the per-run UUID directory:
+
+```json
+{
+  "mode": "audit",
+  "decisions": [ ... ],
+  "blocked_actions": [],
+  "violations": [ ... ]
+}
+```
+
+In `off` mode the file still exists with an empty `decisions` list so consumers can distinguish "policy off" from "not configured".
+
+### Configuring Execution Policy
+
+```yaml
+# evidence_enrichment.yaml
+execution_policy:
+  enabled: true
+  mode: "off"           # off | audit | enforce
+  allowed_actions:      # actions to permit in audit/enforce mode
+    - search
+    - fetch
+    - retrieval
+    - remote_tracing
+    - live_provider_calls
+    - mcp_live_runs
+```

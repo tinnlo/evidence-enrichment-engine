@@ -24,6 +24,8 @@ except ImportError:
 
 
 from evidence_enrichment.config.settings import FieldThresholds, Settings, get_settings
+from evidence_enrichment.execution_policy import ExecutionPolicyEngine
+from evidence_enrichment.execution_policy.models import ActionType
 from evidence_enrichment.core.analysis.replay import ReplayAnalysisAgent
 from evidence_enrichment.context.resolver import ContextResolver
 from evidence_enrichment.core.enrichers.base import BaseEnricher
@@ -89,7 +91,7 @@ from evidence_enrichment.observability.langsmith import (
     trace_payload_inputs,
 )
 from evidence_enrichment.observability.runtime import (
-    activate_runtime_observability_config,
+    activate_remote_tracing_with_policy_check,
     reset_runtime_observability_config,
 )
 from evidence_enrichment.observability.tracer import LocalTracer
@@ -125,6 +127,21 @@ class _FinOpsRunContext:
 _frc_var: ContextVar[_FinOpsRunContext] = ContextVar("_frc_var")
 
 
+@dataclass
+class _PolicyRunContext:
+    """Holds the ExecutionPolicyEngine for a single pipeline run.
+
+    Created fresh at the start of each ``EvidenceCoordinator.run()`` call so
+    that concurrent or sequential reuse of the same coordinator cannot mix
+    policy state across runs.
+    """
+
+    engine: ExecutionPolicyEngine
+
+
+_prc_var: ContextVar[_PolicyRunContext] = ContextVar("_prc_var")
+
+
 class EvidenceCoordinator:
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or get_settings()
@@ -141,6 +158,8 @@ class EvidenceCoordinator:
         # than in the module-global _frc_var so that two different coordinator
         # instances in the same async task cannot share each other's state.
         self._ephemeral_frc: _FinOpsRunContext | None = None
+        # Same pattern for policy run context.
+        self._ephemeral_prc: _PolicyRunContext | None = None
 
     @property
     def _frc(self) -> _FinOpsRunContext:
@@ -177,6 +196,21 @@ class EvidenceCoordinator:
                 max_cost_per_success=self.settings.finops.max_cost_usd_per_success,
                 catalog=self._finops_catalog,
             ),
+        )
+
+    @property
+    def _prc(self) -> _PolicyRunContext:
+        """Return the policy run context for the current async task."""
+        try:
+            return _prc_var.get()
+        except LookupError:
+            if self._ephemeral_prc is None:
+                self._ephemeral_prc = self._new_policy_run_context()
+            return self._ephemeral_prc
+
+    def _new_policy_run_context(self) -> _PolicyRunContext:
+        return _PolicyRunContext(
+            engine=ExecutionPolicyEngine(self.settings.execution_policy),
         )
 
     def _get_retriever(
@@ -239,11 +273,12 @@ class EvidenceCoordinator:
         replay_bundle: str | None = None,
         artifact_label: str | None = None,
     ) -> PipelineRunResult:
-        runtime_token = activate_runtime_observability_config(
+        runtime_token = activate_remote_tracing_with_policy_check(
             backend=self.settings.observability_backend,
             trace_redact_values=self.settings.trace_redact_values,
         )
         _frc_token = _frc_var.set(self._new_finops_run_context())
+        _prc_token = _prc_var.set(self._new_policy_run_context())
         try:
             effective_mode = mode or self.settings.default_mode
             entity_id = str(entity.get("entity_id") or entity.get("id") or "unknown")
@@ -334,9 +369,17 @@ class EvidenceCoordinator:
                 )
                 result.finops_summary = json.loads(finops_summary.model_dump_json())
 
+            # Attach execution policy report — always, regardless of policy mode.
+            # In "off" mode the report will have an empty decisions list; this is
+            # intentional so the artifact slot is always present and consumers can
+            # distinguish "policy off" from "policy not configured".
+            policy_report = self._prc.engine.build_report()
+            result.execution_policy_report = policy_report.model_dump()
+
             trace_artifacts = tracer.write(
                 self.settings.trace_output_path,
                 finops_data=result.finops_summary,
+                execution_policy_data=result.execution_policy_report,
             )
             resolved_context_path = trace_artifacts.trace_dir / "resolved_context.json"
             resolved_context_path.write_text(
@@ -350,7 +393,9 @@ class EvidenceCoordinator:
             return result
         finally:
             _frc_var.reset(_frc_token)
-            reset_runtime_observability_config(runtime_token)
+            _prc_var.reset(_prc_token)
+            if runtime_token is not None:
+                reset_runtime_observability_config(runtime_token)
 
     def _resolve_replay_path(
         self, replay_bundle: str | None, entity: dict, enricher: BaseEnricher
@@ -467,6 +512,44 @@ class EvidenceCoordinator:
             projected_marginal_cost=projected_marginal_cost,
         )
         return decision
+
+    def _check_policy_before_action(self, action: ActionType):
+        """Check execution policy for the given action.
+
+        Returns the PolicyDecision.  In ``enforce`` mode, callers must inspect
+        ``decision.allowed`` and return a structured blocked result when False.
+        In ``off`` and ``audit`` modes, ``decision.allowed`` is always True.
+        """
+        return self._prc.engine.check_action(action)
+
+    def _build_policy_blocked_result(
+        self,
+        entity: dict,
+        search_plan,
+        mode: str,
+        action: ActionType,
+    ) -> PipelineRunResult:
+        """Return a structured PipelineRunResult for a policy-blocked action.
+
+        Does not raise.  Sets gate_reason to ``policy_blocked:<action>`` so
+        callers can distinguish policy blocks from budget blocks.
+        """
+        synthesis = SynthesisResult(
+            field_name=search_plan.field_name,
+            value=None,
+            reasoning=f"Execution policy blocked action: {action.value}",
+            synthesis_confidence=0.0,
+        )
+        return PipelineRunResult(
+            entity_id=str(entity.get("entity_id") or entity.get("id") or "unknown"),
+            field_name=search_plan.field_name,
+            mode=mode,
+            search_plan=search_plan,
+            synthesis=synthesis,
+            overall_confidence=0.0,
+            decision=ReviewDecision.AUTO_REJECT,
+            gate_reason=f"policy_blocked:{action.value}",
+        )
 
     def _apply_downgrade_before_analysis(
         self,
@@ -1127,6 +1210,12 @@ class EvidenceCoordinator:
         tracer: LocalTracer,
     ) -> PipelineRunResult:
         entity_id = str(entity.get("entity_id") or entity.get("id") or "unknown")
+
+        # Policy gate: live_provider_calls covers all live LLM and API traffic.
+        _lpc_decision = self._check_policy_before_action(ActionType.LIVE_PROVIDER_CALLS)
+        if not _lpc_decision.allowed:
+            return self._build_policy_blocked_result(entity, search_plan, mode, ActionType.LIVE_PROVIDER_CALLS)
+
         retriever = self._get_retriever(entity_id)
         use_structured = retriever is not None
         rc = self.settings.retrieval
@@ -1140,6 +1229,10 @@ class EvidenceCoordinator:
         with tracer.span(
             "search", provider="provider_chain", input_count=query_count
         ) as span:
+            # Policy gate: search
+            _search_decision = self._check_policy_before_action(ActionType.SEARCH)
+            if not _search_decision.allowed:
+                return self._build_policy_blocked_result(entity, search_plan, mode, ActionType.SEARCH)
             search_results = await self._stage_search(
                 search_plan,
                 bundle=None,
@@ -1155,6 +1248,10 @@ class EvidenceCoordinator:
         with tracer.span(
             "fetch", provider="httpx", input_count=len(search_results)
         ) as span:
+            # Policy gate: fetch
+            _fetch_decision = self._check_policy_before_action(ActionType.FETCH)
+            if not _fetch_decision.allowed:
+                return self._build_policy_blocked_result(entity, search_plan, mode, ActionType.FETCH)
             fetched_documents = await self._stage_fetch(
                 search_results,
                 bundle=None,
@@ -1202,264 +1299,226 @@ class EvidenceCoordinator:
         retrieval_chunk_count = 0
         retrieved_chunks_map: dict[str, list[RetrievalResult]] = {}
         if retriever is not None:
-            accepted_for_indexing = [
-                d
-                for d in assessed_documents
-                if d.accepted_for_analysis
-                and len(d.full_text or d.text) >= rc.min_doc_chars
-            ]
-            # Deferred retrieval budget gate: now that we know which documents will be
-            # indexed we can project a real embedding cost before spending any tokens.
-            if accepted_for_indexing and self.settings.finops.enabled and self._frc.policy.is_enforcing:
-                from evidence_enrichment.finops.estimation import estimate_tokens as _et
-                # Reset per-stage exhaustion so the retrieval stage gets its own
-                # independent downgrade opportunity.
-                self._frc.policy.reset_downgrade_exhausted()
-                # Project both retrieval_indexing (doc embeddings) AND retrieval_query
-                # (one query embedding per doc) so the gate sees total retrieval spend.
-                # Run the actual chunker (CPU-only, no network) to get the exact chunk
-                # shapes rather than using the formula estimate which diverges from
-                # TableAwareChunker behavior (min_size, table chunks, short final chunks).
-                rc_cfg = self.settings.retrieval
-                _gate_chunk_chars: list[int] = []
-                try:
-                    from evidence_enrichment.core.retrieval.chunker import TableAwareChunker as _Chunker
-                    _gate_chunker = _Chunker(
-                        chunk_size=rc_cfg.chunk_size,
-                        overlap=rc_cfg.overlap,
-                        max_table_size=rc_cfg.max_table_size,
-                    )
-                    for d in accepted_for_indexing:
-                        for c in _gate_chunker.chunk(d):
-                            _gate_chunk_chars.append(len(c.content))
-                except Exception:
-                    # Fallback to formula if chunker import/chunk fails.
-                    chunk_size = rc_cfg.chunk_size
-                    overlap = rc_cfg.overlap
-                    stride = max(chunk_size - overlap, 1)
-                    for d in accepted_for_indexing:
-                        n = math.ceil(len(d.full_text or d.text) / stride)
-                        _gate_chunk_chars.extend([chunk_size] * n)
-                # Sum per-chunk token costs to avoid ceil() undercount from blob tokenization.
-                projected_index_cost = sum(
-                    self._finops_catalog.cost_for_tokens(
-                        self.settings.retrieval.embedding_model, _et("x" * clen), 0
-                    )
-                    for clen in _gate_chunk_chars
-                ) if _gate_chunk_chars else 0.0
-                query_text = enricher.retrieval_query(entity)
-                # Use worst-case adaptive iterations and worst-case query length for
-                # a conservative projection. Adaptive agents append suffix terms on
-                # refinement, so query length can grow. We approximate worst-case
-                # growth by summing all suffix tokens onto the original query.
-                max_iters = max(getattr(retriever, "max_iterations", None) or 1, 1)
-                try:
-                    from evidence_enrichment.core.retrieval.evaluator import _REFINEMENT_SUFFIXES
-                    all_suffix_tokens = " ".join(_REFINEMENT_SUFFIXES)
-                    worst_case_query_len = len(query_text) + len(all_suffix_tokens)
-                except Exception:
-                    worst_case_query_len = len(query_text) * 2  # safe fallback
-                # Sum per-iteration query token costs (one cost call per embedding)
-                # to avoid ceil() undercount from treating all queries as one blob.
-                projected_query_cost = sum(
-                    self._finops_catalog.cost_for_tokens(
-                        self.settings.retrieval.embedding_model,
-                        _et("x" * worst_case_query_len),
-                        0,
-                    )
-                    for _ in range(len(accepted_for_indexing) * max_iters)
-                )
-                projected_emb_cost = projected_index_cost + projected_query_cost
-                retrieval_gate = self._check_budget_before_stage(
-                    "retrieval_indexing", projected_marginal_cost=projected_emb_cost
-                )
-                if retrieval_gate.status.value == "blocked":
-                    return self._build_budget_blocked_result(
-                        entity, search_plan, mode, tracer, retrieval_gate,
-                    )
-                if self._frc.policy.should_disable_retrieval(retrieval_gate):
-                    retriever = None
-                    use_structured = False
-                    self._frc.retrieval_degraded = True
-                    self._frc.record_downgrade(DowngradeAction.RETRIEVAL_OFF)
-                    self._frc.policy.mark_downgrade_exhausted()
-            if retriever is not None:
-                with tracer.span(
-                    "retrieval_indexing",
-                    provider="chroma",
-                    input_count=len(accepted_for_indexing),
-                ) as span:
-                    # indexed_chunk_count: actually stored queryable chunks.
-                    # billed_embedding_count: includes estimated billed chunks for
-                    #   post-embed (upsert) failures so FinOps is accurate.
-                    from evidence_enrichment.core.retrieval.retriever import (  # noqa: PLC0415
-                        IndexingPartialError,
-                    )
-                    indexed_chunk_count = 0
-                    billed_embedding_count = 0
-                    per_chunk_chars: list[int] = []
-                    successfully_indexed_urls: set[str] = set()
-                    for document in accepted_for_indexing:
-                        try:
-                            chunks = retriever.index_document(document)
-                            indexed_chunk_count += len(chunks)
-                            billed_embedding_count += len(chunks)
-                            # Accumulate actual embedded chars (chunk content, not raw doc).
-                            for c in chunks:
-                                per_chunk_chars.append(len(c.content))
-                            # Only mark as successfully indexed when chunks were actually
-                            # embedded and stored — zero-chunk docs have no queryable vectors.
-                            if chunks:
-                                successfully_indexed_urls.add(document.url)
-                        except IndexingPartialError as exc:
-                            # embed_texts succeeded; upsert failed.  Charge the actual
-                            # embedded chunks (exact sizes known) and evict stale vectors.
-                            logging.warning(
-                                "retrieval_indexing upsert failed for %s: %s",
-                                document.url,
-                                exc,
-                            )
-                            self._frc.retrieval_degraded = True
-                            if hasattr(retriever, "evict_document"):
-                                retriever.evict_document(document.url)
-                            billed_embedding_count += len(exc.embedded_chunks)
-                            for c in exc.embedded_chunks:
-                                per_chunk_chars.append(len(c.content))
-                        except Exception as exc:
-                            # Pre-embed failure (chunking / store setup / etc.).
-                            # No embedding was attempted so no cost to accrue.
-                            logging.warning(
-                                "retrieval_indexing failed for %s: %s", document.url, exc
-                            )
-                            self._frc.retrieval_degraded = True
-                            if hasattr(retriever, "evict_document"):
-                                retriever.evict_document(document.url)
-                    span["output_count"] = indexed_chunk_count
-                    retrieval_chunk_count = indexed_chunk_count
-                    if self.settings.finops.enabled and accepted_for_indexing:
-                        emb_rec = estimate_embedding_cost(
-                            stage="retrieval_indexing",
-                            provider="openai",
-                            model_name=self.settings.retrieval.embedding_model,
-                            text_count=billed_embedding_count,
-                            total_chars=sum(per_chunk_chars),
-                            per_text_chars=per_chunk_chars or None,
-                            catalog=self._finops_catalog,
-                        )
-                        self._frc.collector.record(emb_rec)
-                        span["model_name"] = self.settings.retrieval.embedding_model
-                        span["estimated_input_tokens"] = emb_rec.estimated_input_tokens
-                        span["estimated_total_tokens"] = emb_rec.estimated_total_tokens
-                        span["estimated_cost_usd"] = emb_rec.estimated_cost_usd
-
-                # Retrieve only for successfully indexed documents — querying a
-                # failed doc would return stale chunks from a previous run.
-                docs_to_query = [
-                    d for d in accepted_for_indexing
-                    if d.url in successfully_indexed_urls
+            # Policy gate: retrieval
+            _retrieval_decision = self._check_policy_before_action(ActionType.RETRIEVAL)
+            if not _retrieval_decision.allowed:
+                # Disable retrieval silently (enforce mode) — pipeline continues
+                # without retrieval context rather than blocking entirely.
+                retriever = None
+                use_structured = False
+                self._frc.retrieval_degraded = True
+            else:
+                accepted_for_indexing = [
+                    d
+                    for d in assessed_documents
+                    if d.accepted_for_analysis
+                    and len(d.full_text or d.text) >= rc.min_doc_chars
                 ]
-                with tracer.span(
-                    "retrieval_query",
-                    provider="chroma",
-                    input_count=len(docs_to_query),
-                ) as span:
-                    total_query_iterations = 0
-                    total_query_chars = 0
-                    per_iteration_query_chars: list[int] = []
-                    base_query_text = enricher.retrieval_query(entity)
-                    for document in docs_to_query:
-                        # _doc_metrics holds request-scoped accounting returned by
-                        # RetrievalAgent.retrieve() as a (results, RetrievalMetrics)
-                        # tuple.  For plain HybridRetriever (list return), we fall
-                        # back to reading instance fields — those retrievers are not
-                        # shared across concurrent runs so races are not a concern.
-                        _doc_metrics = None
-                        _query_succeeded = False
-                        try:
-                             # RetrievalAgent exposes retrieve_with_metrics() for
-                             # request-scoped FinOps accounting; HybridRetriever only
-                             # exposes retrieve() — fall back to instance fields for that.
-                             if hasattr(retriever, "retrieve_with_metrics"):
-                                 hits, _doc_metrics = retriever.retrieve_with_metrics(
-                                     query=base_query_text,
-                                     document_url=document.url,
-                                 )
-                             else:
-                                 hits = retriever.retrieve(
-                                     query=base_query_text,
-                                     document_url=document.url,
-                                 )
-                             _query_succeeded = True
-                             if hits:
-                                 retrieved_chunks_map[document.url] = hits
-                        except Exception as exc:
-                             logging.warning(
-                                 "retrieval_query failed for %s: %s", document.url, exc
-                             )
-                             self._frc.retrieval_degraded = True
-                             # RetrievalPartialError carries invocation-local metrics
-                             # for any embedding spend before the failure — no
-                             # shared instance fields needed.  It also carries
-                             # partial_results (best-so-far hits from prior
-                             # iterations) so we can still provide context to
-                             # analysis instead of discarding the document entirely.
-                             from evidence_enrichment.core.retrieval.agent import RetrievalPartialError
-                             if isinstance(exc, RetrievalPartialError):
-                                 _doc_metrics = exc.partial_metrics
-                                 if exc.partial_results:
-                                     retrieved_chunks_map[document.url] = exc.partial_results
-                        # Accrue cost for any iterations that actually executed
-                        # (i.e. sent embedding requests).  Skip when zero embeddings ran.
-                        if _doc_metrics is not None:
-                            # Request-scoped metrics (RetrievalAgent path).
-                            if _doc_metrics.iterations == 0 and _doc_metrics.total_query_chars == 0:
-                                continue
-                            doc_iters = max(_doc_metrics.iterations, 1)
-                            total_query_iterations += doc_iters
-                            total_query_chars += _doc_metrics.total_query_chars
-                            if _doc_metrics.query_char_history:
-                                per_iteration_query_chars.extend(_doc_metrics.query_char_history)
-                            else:
-                                per_iter_chars = _doc_metrics.total_query_chars // doc_iters if doc_iters else _doc_metrics.total_query_chars
-                                per_iteration_query_chars.extend([per_iter_chars] * doc_iters)
-                        else:
-                             # Plain HybridRetriever: instance fields are best-effort;
-                             # only accrue when retrieve() actually returned (embed_query
-                             # completed successfully).  Skip on exception to avoid
-                             # phantom spend from pre-embed failures.
-                             if not _query_succeeded:
-                                 continue
-                             doc_iters = max(getattr(retriever, "last_iterations", None) or 1, 1)
-                             total_query_iterations += doc_iters
-                             if getattr(retriever, "last_total_query_chars", 0):
-                                 doc_total = retriever.last_total_query_chars
-                                 total_query_chars += doc_total
-                                 per_iter_chars = doc_total // doc_iters if doc_iters else doc_total
-                                 per_iteration_query_chars.extend([per_iter_chars] * doc_iters)
-                             else:
-                                 doc_query_chars = getattr(retriever, "last_query_chars", None) or len(base_query_text)
-                                 total_query_chars += doc_query_chars * doc_iters
-                                 per_iteration_query_chars.extend([doc_query_chars] * doc_iters)
-                    span["output_count"] = sum(
-                        len(v) for v in retrieved_chunks_map.values()
-                    )
-                    span["agent_iterations"] = total_query_iterations
-                    if self.settings.finops.enabled and accepted_for_indexing:
-                        q_rec = estimate_embedding_cost(
-                            stage="retrieval_query",
-                            provider="openai",
-                            model_name=self.settings.retrieval.embedding_model,
-                            text_count=total_query_iterations,
-                            total_chars=total_query_chars,
-                            per_text_chars=per_iteration_query_chars or None,
-                            catalog=self._finops_catalog,
+                # Deferred retrieval budget gate: now that we know which documents will be
+                # indexed we can project a real embedding cost before spending any tokens.
+                if accepted_for_indexing and self.settings.finops.enabled and self._frc.policy.is_enforcing:
+                    from evidence_enrichment.finops.estimation import estimate_tokens as _et
+                    # Reset per-stage exhaustion so the retrieval stage gets its own
+                    # independent downgrade opportunity.
+                    self._frc.policy.reset_downgrade_exhausted()
+                    rc_cfg = self.settings.retrieval
+                    _gate_chunk_chars: list[int] = []
+                    try:
+                        from evidence_enrichment.core.retrieval.chunker import TableAwareChunker as _Chunker
+                        _gate_chunker = _Chunker(
+                            chunk_size=rc_cfg.chunk_size,
+                            overlap=rc_cfg.overlap,
+                            max_table_size=rc_cfg.max_table_size,
                         )
-                        self._frc.collector.record(q_rec)
-                        span["model_name"] = self.settings.retrieval.embedding_model
-                        span["estimated_input_tokens"] = q_rec.estimated_input_tokens
-                        span["estimated_total_tokens"] = q_rec.estimated_total_tokens
-                        span["estimated_cost_usd"] = q_rec.estimated_cost_usd
+                        for d in accepted_for_indexing:
+                            for c in _gate_chunker.chunk(d):
+                                _gate_chunk_chars.append(len(c.content))
+                    except Exception:
+                        chunk_size = rc_cfg.chunk_size
+                        overlap = rc_cfg.overlap
+                        stride = max(chunk_size - overlap, 1)
+                        for d in accepted_for_indexing:
+                            n = math.ceil(len(d.full_text or d.text) / stride)
+                            _gate_chunk_chars.extend([chunk_size] * n)
+                    projected_index_cost = sum(
+                        self._finops_catalog.cost_for_tokens(
+                            self.settings.retrieval.embedding_model, _et("x" * clen), 0
+                        )
+                        for clen in _gate_chunk_chars
+                    ) if _gate_chunk_chars else 0.0
+                    query_text = enricher.retrieval_query(entity)
+                    max_iters = max(getattr(retriever, "max_iterations", None) or 1, 1)
+                    try:
+                        from evidence_enrichment.core.retrieval.evaluator import _REFINEMENT_SUFFIXES
+                        all_suffix_tokens = " ".join(_REFINEMENT_SUFFIXES)
+                        worst_case_query_len = len(query_text) + len(all_suffix_tokens)
+                    except Exception:
+                        worst_case_query_len = len(query_text) * 2
+                    projected_query_cost = sum(
+                        self._finops_catalog.cost_for_tokens(
+                            self.settings.retrieval.embedding_model,
+                            _et("x" * worst_case_query_len),
+                            0,
+                        )
+                        for _ in range(len(accepted_for_indexing) * max_iters)
+                    )
+                    projected_emb_cost = projected_index_cost + projected_query_cost
+                    retrieval_gate = self._check_budget_before_stage(
+                        "retrieval_indexing", projected_marginal_cost=projected_emb_cost
+                    )
+                    if retrieval_gate.status.value == "blocked":
+                        return self._build_budget_blocked_result(
+                            entity, search_plan, mode, tracer, retrieval_gate,
+                        )
+                    if self._frc.policy.should_disable_retrieval(retrieval_gate):
+                        retriever = None
+                        use_structured = False
+                        self._frc.retrieval_degraded = True
+                        self._frc.record_downgrade(DowngradeAction.RETRIEVAL_OFF)
+                        self._frc.policy.mark_downgrade_exhausted()
+                if retriever is not None:
+                    with tracer.span(
+                        "retrieval_indexing",
+                        provider="chroma",
+                        input_count=len(accepted_for_indexing),
+                    ) as span:
+                        from evidence_enrichment.core.retrieval.retriever import (  # noqa: PLC0415
+                            IndexingPartialError,
+                        )
+                        indexed_chunk_count = 0
+                        billed_embedding_count = 0
+                        per_chunk_chars: list[int] = []
+                        successfully_indexed_urls: set[str] = set()
+                        for document in accepted_for_indexing:
+                            try:
+                                chunks = retriever.index_document(document)
+                                indexed_chunk_count += len(chunks)
+                                billed_embedding_count += len(chunks)
+                                for c in chunks:
+                                    per_chunk_chars.append(len(c.content))
+                                if chunks:
+                                    successfully_indexed_urls.add(document.url)
+                            except IndexingPartialError as exc:
+                                logging.warning(
+                                    "retrieval_indexing upsert failed for %s: %s",
+                                    document.url,
+                                    exc,
+                                )
+                                self._frc.retrieval_degraded = True
+                                if hasattr(retriever, "evict_document"):
+                                    retriever.evict_document(document.url)
+                                billed_embedding_count += len(exc.embedded_chunks)
+                                for c in exc.embedded_chunks:
+                                    per_chunk_chars.append(len(c.content))
+                            except Exception as exc:
+                                logging.warning(
+                                    "retrieval_indexing failed for %s: %s", document.url, exc
+                                )
+                                self._frc.retrieval_degraded = True
+                                if hasattr(retriever, "evict_document"):
+                                    retriever.evict_document(document.url)
+                        span["output_count"] = indexed_chunk_count
+                        retrieval_chunk_count = indexed_chunk_count
+                        if self.settings.finops.enabled and accepted_for_indexing:
+                            emb_rec = estimate_embedding_cost(
+                                stage="retrieval_indexing",
+                                provider="openai",
+                                model_name=self.settings.retrieval.embedding_model,
+                                text_count=billed_embedding_count,
+                                total_chars=sum(per_chunk_chars),
+                                per_text_chars=per_chunk_chars or None,
+                                catalog=self._finops_catalog,
+                            )
+                            self._frc.collector.record(emb_rec)
+                            span["model_name"] = self.settings.retrieval.embedding_model
+                            span["estimated_input_tokens"] = emb_rec.estimated_input_tokens
+                            span["estimated_total_tokens"] = emb_rec.estimated_total_tokens
+                            span["estimated_cost_usd"] = emb_rec.estimated_cost_usd
 
+                    docs_to_query = [
+                        d for d in accepted_for_indexing
+                        if d.url in successfully_indexed_urls
+                    ]
+                    with tracer.span(
+                        "retrieval_query",
+                        provider="chroma",
+                        input_count=len(docs_to_query),
+                    ) as span:
+                        total_query_iterations = 0
+                        total_query_chars = 0
+                        per_iteration_query_chars: list[int] = []
+                        base_query_text = enricher.retrieval_query(entity)
+                        for document in docs_to_query:
+                            _doc_metrics = None
+                            _query_succeeded = False
+                            try:
+                                if hasattr(retriever, "retrieve_with_metrics"):
+                                    hits, _doc_metrics = retriever.retrieve_with_metrics(
+                                        query=base_query_text,
+                                        document_url=document.url,
+                                    )
+                                else:
+                                    hits = retriever.retrieve(
+                                        query=base_query_text,
+                                        document_url=document.url,
+                                    )
+                                _query_succeeded = True
+                                if hits:
+                                    retrieved_chunks_map[document.url] = hits
+                            except Exception as exc:
+                                logging.warning(
+                                    "retrieval_query failed for %s: %s", document.url, exc
+                                )
+                                self._frc.retrieval_degraded = True
+                                from evidence_enrichment.core.retrieval.agent import RetrievalPartialError
+                                if isinstance(exc, RetrievalPartialError):
+                                    _doc_metrics = exc.partial_metrics
+                                    if exc.partial_results:
+                                        retrieved_chunks_map[document.url] = exc.partial_results
+                            if _doc_metrics is not None:
+                                if _doc_metrics.iterations == 0 and _doc_metrics.total_query_chars == 0:
+                                    continue
+                                doc_iters = max(_doc_metrics.iterations, 1)
+                                total_query_iterations += doc_iters
+                                total_query_chars += _doc_metrics.total_query_chars
+                                if _doc_metrics.query_char_history:
+                                    per_iteration_query_chars.extend(_doc_metrics.query_char_history)
+                                else:
+                                    per_iter_chars = _doc_metrics.total_query_chars // doc_iters if doc_iters else _doc_metrics.total_query_chars
+                                    per_iteration_query_chars.extend([per_iter_chars] * doc_iters)
+                            else:
+                                if not _query_succeeded:
+                                    continue
+                                doc_iters = max(getattr(retriever, "last_iterations", None) or 1, 1)
+                                total_query_iterations += doc_iters
+                                if getattr(retriever, "last_total_query_chars", 0):
+                                    doc_total = retriever.last_total_query_chars
+                                    total_query_chars += doc_total
+                                    per_iter_chars = doc_total // doc_iters if doc_iters else doc_total
+                                    per_iteration_query_chars.extend([per_iter_chars] * doc_iters)
+                                else:
+                                    doc_query_chars = getattr(retriever, "last_query_chars", None) or len(base_query_text)
+                                    total_query_chars += doc_query_chars * doc_iters
+                                    per_iteration_query_chars.extend([doc_query_chars] * doc_iters)
+                        span["output_count"] = sum(
+                            len(v) for v in retrieved_chunks_map.values()
+                        )
+                        span["agent_iterations"] = total_query_iterations
+                        if self.settings.finops.enabled and accepted_for_indexing:
+                            q_rec = estimate_embedding_cost(
+                                stage="retrieval_query",
+                                provider="openai",
+                                model_name=self.settings.retrieval.embedding_model,
+                                text_count=total_query_iterations,
+                                total_chars=total_query_chars,
+                                per_text_chars=per_iteration_query_chars or None,
+                                catalog=self._finops_catalog,
+                            )
+                            self._frc.collector.record(q_rec)
+                            span["model_name"] = self.settings.retrieval.embedding_model
+                            span["estimated_input_tokens"] = q_rec.estimated_input_tokens
+                            span["estimated_total_tokens"] = q_rec.estimated_total_tokens
+                            span["estimated_cost_usd"] = q_rec.estimated_cost_usd
 
         accepted_documents = [
             document

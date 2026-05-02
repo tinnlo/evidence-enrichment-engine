@@ -12,6 +12,7 @@
 | Optional LangGraph retrieval path | Retrieval can stay off, run as local RAG, or run as a stateful retrieve-evaluate-refine loop without changing the base artifact contract. |
 | Langfuse-first observability | `OBSERVABILITY_BACKEND` routes traces to Langfuse, LangSmith, both, or neither while local artifacts remain on by default. |
 | AI FinOps for agentic workflows | Per-stage cost estimation, budget-aware execution, and quality/latency/cost tradeoff reporting — all deterministic and replay-friendly. |
+| Execution policy layer | `off\|audit\|enforce` mode governs which live-capability surfaces are permitted. Policy decisions are recorded in `execution_policy.json` separately from FinOps artifacts. |
 | MCP surface | MCP-compatible clients can invoke the replay-safe workflow without inventing a second integration layer. |
 
 ## Architecture At A Glance
@@ -170,6 +171,47 @@ finops:
 ```
 
 Costs are **estimated**, not billed. See [docs/observability.md](docs/observability.md) for details.
+
+## Execution Policy
+
+The execution policy layer governs **capability** — which live-capability surfaces are permitted to run. It is separate from FinOps, which governs **cost**.
+
+| `execution_policy.mode` | Behavior |
+|---|---|
+| `off` | No policy enforcement. All actions proceed. Artifact still written with empty decisions list. |
+| `audit` | All actions proceed. Policy violations are recorded in `execution_policy.json` but never block the run. |
+| `enforce` | Disallowed actions are blocked. The run returns a structured result with a `gate_reason` instead of raising an exception. |
+
+Governed action surfaces:
+
+| Action | What it covers |
+|---|---|
+| `search` | Live web search calls |
+| `fetch` | Live URL fetches |
+| `retrieval` | Retrieval indexing and query (LangGraph or local RAG) |
+| `remote_tracing` | Langfuse / LangSmith trace egress |
+| `live_provider_calls` | Any live LLM provider API call |
+| `mcp_live_runs` | MCP-triggered live execution paths |
+
+Configuration:
+
+```yaml
+# evidence_enrichment.yaml
+execution_policy:
+  enabled: true
+  mode: "off"          # off | audit | enforce
+  allowed_actions:
+    - search
+    - fetch
+    - retrieval
+    - remote_tracing
+    - live_provider_calls
+    - mcp_live_runs
+```
+
+Each run writes `execution_policy.json` alongside `finops_summary.json` in `examples/output/traces/<trace_id>/`. Both artifacts are independently inspectable.
+
+See [docs/observability.md](docs/observability.md) for artifact schema, gate reasons, and configuration details.
 
 ## Retrieval And LangGraph
 

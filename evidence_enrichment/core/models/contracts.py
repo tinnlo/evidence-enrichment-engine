@@ -227,3 +227,4 @@ class PipelineRunResult(BaseModel):
     retrieval_degraded: bool = False
     guardrails_report: GuardrailsReport | None = None
     finops_summary: dict[str, Any] | None = None
+    execution_policy_report: dict[str, Any] | None = None

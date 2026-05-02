@@ -35,3 +35,19 @@ finops:
   openai_cheap_model: "gpt-4.1-nano"
   anthropic_cheap_model: "claude-3-5-haiku-latest"
 
+# Execution policy governs capability (which live surfaces the agent may use).
+# Separate from finops, which governs cost.
+# mode: "off" | "audit" | "enforce"
+# allowed_actions: list of permitted live-capability surfaces.
+# Defaults are replay-safe: mode=off, all actions allowed.
+execution_policy:
+  enabled: true
+  mode: "off"
+  allowed_actions:
+    - search
+    - fetch
+    - retrieval
+    - remote_tracing
+    - live_provider_calls
+    - mcp_live_runs
+

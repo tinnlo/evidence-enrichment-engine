@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 OBSERVABILITY_STATE_LOCK = threading.RLock()
 
@@ -153,3 +156,54 @@ def restore_evicted_observability_values(snapshot: dict[str, str]) -> None:
     with OBSERVABILITY_STATE_LOCK:
         _EVICTED_OBSERVABILITY_VALUES.clear()
         _EVICTED_OBSERVABILITY_VALUES.update(snapshot)
+
+
+# ---------------------------------------------------------------------------
+# Policy-aware remote tracing activation
+# ---------------------------------------------------------------------------
+
+
+def activate_remote_tracing_with_policy_check(
+    *,
+    backend: str | None = None,
+    trace_redact_values: bool | None = None,
+) -> "Token[RuntimeObservabilityConfig | None] | None":
+    """Activate remote tracing only when the execution policy permits it.
+
+    Returns the ContextVar token on success (same as
+    ``activate_runtime_observability_config``), or ``None`` when the policy
+    engine blocks ``REMOTE_TRACING`` in *enforce* mode.  In *audit* mode the
+    token is still returned but a violation is recorded on the active
+    ``_PolicyRunContext`` (if one is live).
+    """
+    # Import here to avoid a circular dependency at module load time.
+    from evidence_enrichment.execution_policy.engine import ExecutionPolicyEngine  # noqa: PLC0415
+    from evidence_enrichment.execution_policy.models import ActionType  # noqa: PLC0415
+
+    # Best-effort: retrieve the active policy engine from the coordinator's
+    # run-context ContextVar.  If no run is active the import will succeed but
+    # the ContextVar will return None, so we fall through to unconditional
+    # activation (no policy configured = allow).
+    engine: ExecutionPolicyEngine | None = None
+    try:
+        from evidence_enrichment.pipeline.coordinator import _prc_var  # noqa: PLC0415
+
+        prc = _prc_var.get(None)
+        if prc is not None:
+            engine = prc.engine
+    except Exception:  # pragma: no cover
+        pass
+
+    if engine is not None:
+        decision = engine.check_action(ActionType.REMOTE_TRACING)
+        if not decision.allowed:
+            logger.info(
+                "execution_policy: REMOTE_TRACING blocked (mode=%s)",
+                engine.mode,
+            )
+            return None
+
+    return activate_runtime_observability_config(
+        backend=backend,
+        trace_redact_values=trace_redact_values,
+    )

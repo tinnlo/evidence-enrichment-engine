@@ -346,6 +346,42 @@ class FinOpsSettings(BaseModel):
     pricing_override: dict[str, dict[str, float]] = Field(default_factory=dict)
 
 
+class ExecutionPolicySettings(BaseModel):
+    """Execution policy configuration for capability governance.
+
+    Governs *which live-capability surfaces* the pipeline is permitted to use
+    at runtime.  This is intentionally separate from FinOpsSettings, which
+    governs cost.  A run can be policy-allowed but budget-breaching, or
+    budget-safe but capability-blocked — both outcomes are independently
+    visible in their respective artifacts.
+
+    mode:
+        "off"     — policy inactive; all actions pass through unrecorded.
+        "audit"   — all actions allowed; violations recorded in artifact.
+        "enforce" — actions not in allowed_actions are blocked; pipeline
+                    returns a structured result with gate_reason set.
+
+    allowed_actions:
+        List of action names that are permitted when mode is "audit" or
+        "enforce".  Valid values: search, fetch, retrieval, remote_tracing,
+        live_provider_calls, mcp_live_runs.
+        Defaults to all actions (replay-safe: nothing is blocked by default).
+    """
+
+    enabled: bool = True
+    mode: str = "off"  # "off" | "audit" | "enforce"
+    allowed_actions: list[str] = Field(
+        default_factory=lambda: [
+            "search",
+            "fetch",
+            "retrieval",
+            "remote_tracing",
+            "live_provider_calls",
+            "mcp_live_runs",
+        ]
+    )
+
+
 class Settings(BaseModel):
     default_mode: str = "auto"
     replay_dir: str = "examples/replay"
@@ -360,6 +396,7 @@ class Settings(BaseModel):
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     guardrails: GuardrailsSettings = Field(default_factory=GuardrailsSettings)
     finops: FinOpsSettings = Field(default_factory=FinOpsSettings)
+    execution_policy: ExecutionPolicySettings = Field(default_factory=ExecutionPolicySettings)
     observability_backend: str = "langfuse"
     trace_redact_values: bool = True
     openai_api_key: str | None = None

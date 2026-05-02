@@ -1,60 +1,52 @@
-# IMPLEMENTATION PLAN — AI FinOps Layer
+# IMPLEMENTATION PLAN — Execution Policy Layer
+
+All 5 stages complete.
+
+## Stage 1: Config surface + domain models
+**Status**: Complete
+
+- `evidence_enrichment/execution_policy/models.py`: `PolicyMode`, `ActionType`, `PolicyDecision`, `ExecutionPolicyReport`
+- `evidence_enrichment/execution_policy/__init__.py`: package exports
+- `evidence_enrichment/config/settings.py`: `ExecutionPolicySettings`, `Settings.execution_policy`
+- `evidence_enrichment.yaml`: `execution_policy:` block with replay-safe defaults
+- `evidence_enrichment/core/models/contracts.py`: `execution_policy_report` field on `PipelineRunResult`
+
+## Stage 2: Policy engine
+**Status**: Complete
+
+- `evidence_enrichment/execution_policy/engine.py`: `ExecutionPolicyEngine` with `check_action()`, `build_report()`, `reset()`
+- off / audit / enforce logic; mirrors `BudgetPolicyEngine` pattern
+
+## Stage 3: Pipeline integration
+**Status**: Complete
+
+- `evidence_enrichment/pipeline/coordinator.py`:
+  - `_PolicyRunContext` + `_prc_var` (mirrors `_FinOpsRunContext`)
+  - `LIVE_PROVIDER_CALLS` gate at top of `_run_live()`
+  - `SEARCH`, `FETCH`, `RETRIEVAL` gates at each live surface
+  - `execution_policy_report` attached to `PipelineRunResult` after every run
+  - `execution_policy_data` passed to `tracer.write()`
+
+## Stage 4: Observability + MCP integration
+**Status**: Complete
+
+- `evidence_enrichment/observability/runtime.py`: `activate_remote_tracing_with_policy_check()` — policy-aware wrapper for remote backend activation
+- `evidence_enrichment/observability/tracer.py`: `execution_policy.json` artifact written per run; `TraceArtifacts.execution_policy_path` and `as_refs()` updated
+- `evidence_enrichment/mcp_server.py`: `MCP_LIVE_RUNS` gate in `_run_pipeline()` before coordinator is spun up
+
+## Stage 5: Tests + documentation
+**Status**: Complete
+
+- `tests/test_execution_policy.py`: 29 tests covering models, engine (all modes), config, tracer artifact, contract field, and replay pipeline smoke tests
+- `docs/goals_and_features.md`: Execution Policy row added to feature table
+- `docs/observability.md`: Full "Execution Policy" section added (modes, governed actions, replay safety, artifact schema, YAML config)
+- This file: replaced FinOps plan with completed Execution Policy plan
 
 ## Locked Decisions
 
-- Eval output: sidecar `evals/output/latest_finops_report.json`, keep `latest_report.json` stable.
-- `budget_mode=strict`: downgrade first, then return structured budget-rejected result (no exception).
-- Cost scope: LLM calls + embedding calls (analysis, synthesis, retrieval_indexing, retrieval_query).
-- Usage source: provider-reported when available, deterministic estimate otherwise.
-- Same-provider tiering: model downgrades stay within the selected provider family.
-- Architecture: small `evidence_enrichment/finops/` package, not sprinkled logic.
-
-## Stage 1: FinOps Foundation
-
-**Goal**: Introduce durable FinOps contracts, config, and defaults without changing runtime behavior.
-
-**Success Criteria**: FinOps config loads with safe defaults. Existing pipeline and eval code unchanged. Trace contracts remain backward-compatible.
-
-**Tests**: Settings/config tests for FinOps defaults. Model serialization tests for FinOps fields.
-
-**Status**: Complete
-
-## Stage 2: Cost Capture And Aggregation
-
-**Goal**: Collect stage-level and run-level AI cost data deterministically.
-
-**Success Criteria**: Replay and live runs both emit consistent FinOps summaries. All four model-backed stages represented. Provider usage preferred but never required.
-
-**Tests**: Token estimation and pricing unit tests. Provider normalization tests. Retrieval embedder cost tests.
-
-**Status**: Complete
-
-## Stage 3: Budget Policy And Same-Provider Tiered Routing
-
-**Goal**: Make FinOps operational by controlling execution, not just observing it.
-
-**Success Criteria**: `warn` never changes execution. `strict` applies downgrade before blocking. Budget-blocked runs produce normal artifacts. No provider switching.
-
-**Tests**: Policy projection, downgrade, and block tests. Pipeline mode tests. Structured result tests.
-
-**Status**: Complete
-
-## Stage 4: Artifacts, Eval Sidecar, And CLI Surfacing
-
-**Goal**: Make cost and budget outcomes inspectable locally and in eval output.
-
-**Success Criteria**: Trace directories show cost/route/budget. Eval harness emits dedicated FinOps artifact. Local-only replay generates FinOps artifacts without credentials.
-
-**Tests**: Artifact ref assertions. FinOps report schema conformance. CLI output checks.
-
-**Status**: Complete
-
-## Stage 5: Docs, Hardening, And End-To-End Verification
-
-**Goal**: Present the repo as a credible AI FinOps production prototype.
-
-**Success Criteria**: Docs tell a coherent quality/latency/cost governance story. All verification commands pass.
-
-**Tests**: `pytest tests/`, `evidence-enrich eval`, `evidence-enrich demo --mode replay`, `ruff check .`
-
-**Status**: Complete
+- `RETRIEVAL` gate: enforce mode disables retrieval silently (pipeline continues without context) — retrieval is optional context, not a hard dependency
+- `REMOTE_TRACING` gate: uses `activate_remote_tracing_with_policy_check()` which returns `None` on block; callers must handle `None` token
+- `off` mode: `execution_policy.json` still written with empty `decisions` list — "policy off" is distinguishable from "not configured"
+- `audit` mode: violations are recorded but never block execution
+- Block results use `gate_reason="policy_blocked:<action>"` mirroring `budget_blocked:` pattern
+- Replay path is unconditionally exempt — no live gates are reached

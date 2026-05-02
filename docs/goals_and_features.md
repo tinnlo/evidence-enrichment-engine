@@ -92,6 +92,7 @@ style OUTPUTS fill:transparent,stroke:#e65100,stroke-width:1px,stroke-dasharray:
 | MCP surface | The MCP server exposes replay-safe tools and resources over stdio or streamable HTTP. | The pipeline can be consumed by AI clients without inventing a separate adapter layer. |
 | Guardrails | Post-synthesis checks can reject low-confidence or invalid outputs before return. | The final answer is gated by policy rather than treated as automatically safe. |
 | AI FinOps | Per-stage cost estimation, budget-aware execution policies, and quality/latency/cost tradeoff reporting. | The workflow measures cost, enforces budgets, and shows tradeoffs in a reproducible way. |
+| Execution Policy | Capability-governance layer (`off` / `audit` / `enforce`) that gates live actions (search, fetch, retrieval, remote tracing, MCP live runs) independently of cost controls. | Operators can restrict which live surfaces are permitted at runtime without touching FinOps config. |
 
 ## Observability Positioning
 

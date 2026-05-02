@@ -38,6 +38,8 @@ from evidence_enrichment.config.settings import get_settings
 from evidence_enrichment.core.enrichers.hq_country import HeadquartersCountryEnricher
 from evidence_enrichment.core.models.contracts import FactClaim, PipelineRunResult
 from evidence_enrichment.core.models.enums import ReviewDecision
+from evidence_enrichment.execution_policy.engine import ExecutionPolicyEngine
+from evidence_enrichment.execution_policy.models import ActionType
 from evidence_enrichment.pipeline.coordinator import EvidenceCoordinator
 
 try:
@@ -112,6 +114,21 @@ async def _run_pipeline(
     replay_bundle: str | None = None,
 ) -> PipelineRunResult:
     """Run the enrichment pipeline and return a full PipelineRunResult."""
+    settings = get_settings()
+
+    # Gate live runs via execution policy before spinning up the coordinator.
+    # Replay mode is always permitted — policy only applies to live network calls.
+    if mode != "replay":
+        policy_engine = ExecutionPolicyEngine(settings.execution_policy)
+        decision = policy_engine.check_action(ActionType.MCP_LIVE_RUNS)
+        if not decision.allowed:
+            raise PermissionError(
+                f"execution_policy: MCP_LIVE_RUNS is blocked in "
+                f"'{settings.execution_policy.mode}' mode. "
+                "Set execution_policy.mode to 'off' or 'audit' to allow live runs, "
+                "or add 'mcp_live_runs' to the allowed_actions list."
+            )
+
     coordinator = EvidenceCoordinator()
     enricher = HeadquartersCountryEnricher()
     return await coordinator.run(
