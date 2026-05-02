@@ -308,8 +308,6 @@ class TestTracerExecutionPolicyArtifact:
 @pytest.mark.asyncio
 async def test_replay_pipeline_attaches_policy_report():
     """Replay runs must always produce an execution_policy_report, even in off mode."""
-    import asyncio
-
     from evidence_enrichment.core.enrichers.hq_country import HeadquartersCountryEnricher
     from evidence_enrichment.pipeline.coordinator import EvidenceCoordinator
 
@@ -329,9 +327,7 @@ async def test_replay_pipeline_attaches_policy_report():
 @pytest.mark.asyncio
 async def test_replay_pipeline_policy_report_has_no_violations():
     """Replay path must never produce policy violations regardless of mode."""
-    import asyncio
-
-    from evidence_enrichment.config.settings import ExecutionPolicySettings, Settings
+    from evidence_enrichment.config.settings import ExecutionPolicySettings
     from evidence_enrichment.core.enrichers.hq_country import HeadquartersCountryEnricher
     from evidence_enrichment.pipeline.coordinator import EvidenceCoordinator
 
@@ -374,7 +370,6 @@ class TestActivateRemoteTracingWithPolicyCheck:
     def test_returns_none_when_remote_tracing_blocked(self):
         """In enforce mode with REMOTE_TRACING not allowed the helper must return None."""
         from evidence_enrichment.execution_policy.engine import ExecutionPolicyEngine
-        from evidence_enrichment.execution_policy.models import ActionType
         from evidence_enrichment.observability.runtime import (
             activate_remote_tracing_with_policy_check,
         )
