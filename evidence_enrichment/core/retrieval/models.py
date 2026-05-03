@@ -37,6 +37,7 @@ class RetrievalResult(BaseModel):
     vector_score: float = 0.0
     keyword_score: float = 0.0
     rank: int = 0
+    table_boost_score: float = 0.0
     is_table_boost: bool = False
     document_url: str = ""
 

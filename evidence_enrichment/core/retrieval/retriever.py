@@ -289,6 +289,7 @@ class HybridRetriever:
                         score=hybrid,
                         vector_score=hit.vector_score,
                         keyword_score=kw,
+                        table_boost_score=tb,
                         is_table_boost=tb > 0,
                     )
                 )

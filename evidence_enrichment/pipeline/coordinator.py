@@ -1504,6 +1504,27 @@ class EvidenceCoordinator:
                             len(v) for v in retrieved_chunks_map.values()
                         )
                         span["agent_iterations"] = total_query_iterations
+                        # Build top-3 score breakdown across all retrieved chunks
+                        _all_results = [
+                            r
+                            for hits in retrieved_chunks_map.values()
+                            for r in hits
+                        ]
+                        _all_results.sort(key=lambda r: r.score, reverse=True)
+                        _top3 = _all_results[:3]
+                        span["chunk_count"] = len(_all_results)
+                        span["top_chunk_score"] = round(_top3[0].score, 4) if _top3 else None
+                        span["retrieval_score_breakdown"] = [
+                            {
+                                "rank": i + 1,
+                                "chunk_id": r.chunk.chunk_id,
+                                "vector": round(r.vector_score, 4),
+                                "keyword": round(r.keyword_score, 4),
+                                "table_boost": round(r.table_boost_score, 4),
+                                "fused": round(r.score, 4),
+                            }
+                            for i, r in enumerate(_top3)
+                        ]
                         if self.settings.finops.enabled and accepted_for_indexing:
                             q_rec = estimate_embedding_cost(
                                 stage="retrieval_query",

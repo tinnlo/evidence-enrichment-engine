@@ -1,0 +1,97 @@
+{
+  "search_results": [
+    {
+      "url": "https://www.microsoft.com/en-us/about",
+      "title": "About Microsoft",
+      "snippet": "Microsoft is headquartered in Redmond, Washington, United States.",
+      "provider": "replay",
+      "rank": 1,
+      "domain": "microsoft.com",
+      "source_tier": "official"
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/789019/",
+      "title": "Microsoft 10-K SEC Filing",
+      "snippet": "Microsoft Corporation is a Washington corporation headquartered in Redmond, Washington.",
+      "provider": "replay",
+      "rank": 2,
+      "domain": "sec.gov",
+      "source_tier": "regulatory"
+    }
+  ],
+  "parsed_documents": [
+    {
+      "url": "https://www.microsoft.com/en-us/about",
+      "title": "About Microsoft",
+      "content_type": "text/html",
+      "text": "Microsoft Corporation is a multinational technology company headquartered in Redmond, Washington, United States of America. Founded in 1975 by Bill Gates and Paul Allen, Microsoft has grown to become one of the world's largest technology corporations by market capitalisation. The company's principal executive offices are located at One Microsoft Way, Redmond, WA 98052, USA.\n\nMicrosoft develops, licenses, and supports a wide range of software products, services, devices, and solutions. The company's flagship products include the Microsoft Windows operating system, the Microsoft Office productivity suite, the Azure cloud computing platform, the Bing search engine, and the Xbox gaming console. Microsoft also produces hardware including the Surface line of personal computers and tablets.\n\nThe company is organised into three principal business segments: Productivity and Business Processes, Intelligent Cloud, and More Personal Computing. Each segment serves distinct customer groups ranging from individual consumers to large enterprise organisations and government entities worldwide.\n\nMicrosoft employs approximately 220,000 people globally across offices in more than 190 countries and regions. The company's international headquarters for the EMEA region is located in Dublin, Ireland, while the Asia-Pacific regional headquarters is in Singapore. Despite its extensive global presence, the company's corporate domicile and principal place of business remains in the United States, specifically in the state of Washington.\n\nAs a publicly traded company on the NASDAQ stock exchange under the ticker symbol MSFT, Microsoft is subject to SEC reporting requirements. The company files annual reports on Form 10-K, quarterly reports on Form 10-Q, and current reports on Form 8-K with the Securities and Exchange Commission. All filings are made pursuant to the laws of the state of Washington and the United States federal securities law.\n\nMicrosoft's legal name is Microsoft Corporation. Its registered agent in the state of Washington is Corporation Service Company, 300 Deschutes Way SW, Suite 208 MC-CSC1, Tumwater, WA 98501. The company was incorporated under the laws of Washington State in 1981, having previously operated as a partnership since its founding in 1975.\n\nFor investor relations enquiries, Microsoft's registered office address is One Microsoft Way, Redmond, Washington 98052-6399, United States. The company's main telephone number for investor enquiries is +1 (425) 882-8080.",
+      "excerpt": "Microsoft Corporation is a multinational technology company headquartered in Redmond, Washington, United States of America.",
+      "document_type": "company_website",
+      "entity_match_score": 1.0,
+      "source_authority_score": 0.95,
+      "freshness_score": 0.9,
+      "accepted_for_analysis": true,
+      "rejection_reason": null
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/789019/",
+      "title": "Microsoft 10-K SEC Filing",
+      "content_type": "text/html",
+      "text": "UNITED STATES SECURITIES AND EXCHANGE COMMISSION\nWashington, D.C. 20549\nFORM 10-K\nANNUAL REPORT PURSUANT TO SECTION 13 OR 15(d) OF THE SECURITIES EXCHANGE ACT OF 1934\n\nFor the fiscal year ended June 30, 2024\nCommission file number: 0-14278\n\nMICROSOFT CORPORATION\n(Exact name of registrant as specified in its charter)\n\nWashington\n(State or other jurisdiction of incorporation or organisation)\n\n91-1144442\n(I.R.S. Employer Identification No.)\n\nOne Microsoft Way, Redmond, Washington 98052-6399\n(Address of principal executive offices, including zip code)\n\n(425) 882-8080\n(Registrant's telephone number, including area code)\n\nSecurities registered pursuant to Section 12(b) of the Act:\nCommon stock, $0.00000625 par value per share — MSFT — NASDAQ\n\nIndicate by check mark whether the registrant is a well-known seasoned issuer, as defined in Rule 405 of the Securities Act. Yes [X] No [ ]\n\nINTRODUCTION AND GENERAL DESCRIPTION OF BUSINESS\n\nMicrosoft Corporation (the Company) is a Washington corporation founded in 1975. Our mission is to empower every person and every organisation on the planet to achieve more. We develop and support software, services, devices, and solutions that help people and businesses realise their full potential.\n\nThe Company is incorporated under the laws of the State of Washington. Its principal executive offices are located at One Microsoft Way, Redmond, Washington 98052, United States of America. The Company's fiscal year ends on June 30 of each calendar year.\n\nAs of June 30, 2024, the Company had approximately 228,000 full-time employees. The Company's common shares are listed on the NASDAQ Global Select Market under the symbol MSFT.\n\nSEGMENT INFORMATION\n\nThe Company operates in three reportable segments: (1) Productivity and Business Processes, (2) Intelligent Cloud, and (3) More Personal Computing.\n\nProductivity and Business Processes includes products and services in our portfolio of productivity, communication, and information services, spanning a variety of devices and platforms. This segment primarily comprises Office Commercial, Office Consumer, LinkedIn, and Dynamics products and services.\n\nIntelligent Cloud includes our public, private, and hybrid server products and cloud services that can power modern business and developers. This segment primarily consists of Server products and cloud services, including Azure and other cloud services, SQL Server, Windows Server, Visual Studio, System Center, and related Client Access Licenses.\n\nMore Personal Computing includes products and services geared towards harmonising the interests of end users, developers, and IT professionals across all devices. This segment primarily comprises Windows OEM licensing and other non-volume licensing of the Windows operating system, devices, including Surface and PC accessories, gaming, including Xbox hardware and Xbox content and services, and search and news advertising.\n\nFINANCIAL HIGHLIGHTS\n\nFor the fiscal year ended June 30, 2024:\n- Total revenue: $245.1 billion\n- Operating income: $109.4 billion\n- Net income: $88.1 billion\n- Diluted earnings per share: $11.80\n\nThe Company's headquarters country for regulatory and tax purposes is the United States. All financial statements are prepared in accordance with US GAAP. The functional and reporting currency of the parent entity is the United States dollar (USD).",
+      "excerpt": "Microsoft Corporation is a Washington corporation. Principal executive offices: One Microsoft Way, Redmond, Washington 98052, United States.",
+      "document_type": "regulatory_filing",
+      "entity_match_score": 1.0,
+      "source_authority_score": 0.98,
+      "freshness_score": 0.9,
+      "accepted_for_analysis": true,
+      "rejection_reason": null
+    }
+  ],
+  "analysis_reports": [
+    {
+      "source_url": "https://www.microsoft.com/en-us/about",
+      "reasoning": "Official website explicitly states the company is headquartered in Redmond, Washington, United States.",
+      "claims": [
+        {
+          "field_name": "hq_country",
+          "candidate_value": "USA",
+          "supporting_excerpt": "Microsoft Corporation is a multinational technology company headquartered in Redmond, Washington, United States of America.",
+          "source_url": "https://www.microsoft.com/en-us/about",
+          "source_title": "About Microsoft",
+          "analysis_confidence": 0.92,
+          "source_authority_score": 0.95,
+          "freshness_score": 0.9,
+          "entity_match_score": 1.0
+        }
+      ]
+    },
+    {
+      "source_url": "https://www.sec.gov/Archives/edgar/data/789019/",
+      "reasoning": "10-K regulatory filing places principal executive offices in the United States, Washington state.",
+      "claims": [
+        {
+          "field_name": "hq_country",
+          "candidate_value": "USA",
+          "supporting_excerpt": "Its principal executive offices are located at One Microsoft Way, Redmond, Washington 98052, United States of America.",
+          "source_url": "https://www.sec.gov/Archives/edgar/data/789019/",
+          "source_title": "Microsoft 10-K SEC Filing",
+          "analysis_confidence": 0.97,
+          "source_authority_score": 0.98,
+          "freshness_score": 0.9,
+          "entity_match_score": 1.0
+        }
+      ]
+    }
+  ],
+  "synthesis": {
+    "value": "USA",
+    "normalized_value": "USA",
+    "reasoning": "Both the official website and the 10-K regulatory filing consistently identify the United States as the headquarters country, with principal executive offices in Redmond, Washington.",
+    "synthesis_confidence": 0.96,
+    "supporting_urls": [
+      "https://www.microsoft.com/en-us/about",
+      "https://www.sec.gov/Archives/edgar/data/789019/"
+    ],
+    "conflicts": []
+  }
+}

@@ -35,6 +35,7 @@ class SpanRecord(BaseModel):
     estimated_cost_usd: float | None = None
     budget_status: str | None = None
     downgrade_applied: str | None = None
+    retrieval_score_breakdown: list[dict] | None = None
 
 
 class TraceSummary(BaseModel):
