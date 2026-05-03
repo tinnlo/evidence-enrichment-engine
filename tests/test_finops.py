@@ -47,12 +47,12 @@ class TestPricingCatalog:
     def test_known_model_cost(self):
         catalog = PricingCatalog()
         cost = catalog.cost_for_tokens("GPT-5.4", 1_000_000, 0)
-        assert cost == pytest.approx(0.40, abs=1e-6)
+        assert cost == pytest.approx(2.50, abs=1e-6)
 
     def test_output_tokens(self):
         catalog = PricingCatalog()
         cost = catalog.cost_for_tokens("GPT-5.4", 0, 1_000_000)
-        assert cost == pytest.approx(1.60, abs=1e-6)
+        assert cost == pytest.approx(15.00, abs=1e-6)
 
     def test_unknown_model_zero_cost(self):
         catalog = PricingCatalog()
