@@ -1556,7 +1556,7 @@ class TestTraceRedactValues:
 
     def test_summarize_synthesis_no_redaction_when_explicitly_disabled(self) -> None:
         from evidence_enrichment.core.models.contracts import SynthesisResult
-        from evidence_enrichment.observability.langsmith import summarize_synthesis
+        from evidence_enrichment.observability.summarizers import summarize_synthesis
 
         os.environ["TRACE_REDACT_VALUES"] = "false"
         synthesis = SynthesisResult(
@@ -1575,7 +1575,8 @@ class TestTraceRedactValues:
 
     def test_summarize_synthesis_redacts_when_env_var_set(self, monkeypatch) -> None:
         from evidence_enrichment.core.models.contracts import SynthesisResult
-        from evidence_enrichment.observability.langsmith import _REDACT_SENTINEL, summarize_synthesis
+        from evidence_enrichment.observability.redaction import REDACT_SENTINEL
+        from evidence_enrichment.observability.summarizers import summarize_synthesis
 
         monkeypatch.setenv("TRACE_REDACT_VALUES", "true")
         synthesis = SynthesisResult(
@@ -1588,16 +1589,17 @@ class TestTraceRedactValues:
             reasoning="test",
         )
         result = summarize_synthesis(synthesis)
-        assert result["value"] == _REDACT_SENTINEL
-        assert result["normalized_value"] == _REDACT_SENTINEL
-        assert result["supporting_urls"] == _REDACT_SENTINEL
+        assert result["value"] == REDACT_SENTINEL
+        assert result["normalized_value"] == REDACT_SENTINEL
+        assert result["supporting_urls"] == REDACT_SENTINEL
         # Non-sensitive fields must pass through.
         assert result["synthesis_confidence"] == 0.9
         assert result["conflict_count"] == 0
 
     def test_summarize_claims_redacts_candidate_values(self, monkeypatch) -> None:
         from evidence_enrichment.core.models.contracts import FactClaim
-        from evidence_enrichment.observability.langsmith import _REDACT_SENTINEL, summarize_claims
+        from evidence_enrichment.observability.redaction import REDACT_SENTINEL
+        from evidence_enrichment.observability.summarizers import summarize_claims
 
         monkeypatch.setenv("TRACE_REDACT_VALUES", "1")
         claims = [
@@ -1614,14 +1616,15 @@ class TestTraceRedactValues:
             ),
         ]
         result = summarize_claims(claims)
-        assert result["candidate_values"] == _REDACT_SENTINEL
-        assert result["source_urls"] == _REDACT_SENTINEL
+        assert result["candidate_values"] == REDACT_SENTINEL
+        assert result["source_urls"] == REDACT_SENTINEL
         assert result["claim_count"] == 1
 
     def test_summarize_analysis_reports_redacts_candidate_values(self, monkeypatch) -> None:
         from evidence_enrichment.core.models.contracts import AnalysisReport, FactClaim
         from evidence_enrichment.core.models.contracts import ProviderType
-        from evidence_enrichment.observability.langsmith import _REDACT_SENTINEL, summarize_analysis_reports
+        from evidence_enrichment.observability.redaction import REDACT_SENTINEL
+        from evidence_enrichment.observability.summarizers import summarize_analysis_reports
 
         monkeypatch.setenv("TRACE_REDACT_VALUES", "true")
         claim = FactClaim(
@@ -1637,15 +1640,16 @@ class TestTraceRedactValues:
         )
         report = AnalysisReport(source_url="https://r.com", provider=ProviderType.OPENAI, claims=[claim])
         result = summarize_analysis_reports([report])
-        assert result["candidate_values"] == _REDACT_SENTINEL
-        assert result["source_urls"] == _REDACT_SENTINEL
+        assert result["candidate_values"] == REDACT_SENTINEL
+        assert result["source_urls"] == REDACT_SENTINEL
         assert result["report_count"] == 1
 
     def test_trace_redact_values_setting_controls_redaction(self, tmp_path, monkeypatch) -> None:
         """Settings.load() with trace_redact_values=true in .env enables redaction."""
         from evidence_enrichment.config.settings import Settings, _reset_settings_cache
         from evidence_enrichment.core.models.contracts import SynthesisResult
-        from evidence_enrichment.observability.langsmith import _REDACT_SENTINEL, summarize_synthesis
+        from evidence_enrichment.observability.redaction import REDACT_SENTINEL
+        from evidence_enrichment.observability.summarizers import summarize_synthesis
 
         _clear_obs_keys(monkeypatch)
         env_file = tmp_path / "test.env"
@@ -1665,14 +1669,15 @@ class TestTraceRedactValues:
             reasoning="test",
         )
         result = summarize_synthesis(synthesis)
-        assert result["value"] == _REDACT_SENTINEL
+        assert result["value"] == REDACT_SENTINEL
 
         # Clean up env flag set by Settings.load.
         monkeypatch.delenv("TRACE_REDACT_VALUES", raising=False)
 
     def test_summarize_search_results_redacts_top_urls(self, monkeypatch) -> None:
         from evidence_enrichment.core.models.contracts import ProviderType, SearchResult
-        from evidence_enrichment.observability.langsmith import _REDACT_SENTINEL, summarize_search_results
+        from evidence_enrichment.observability.redaction import REDACT_SENTINEL
+        from evidence_enrichment.observability.summarizers import summarize_search_results
 
         monkeypatch.setenv("TRACE_REDACT_VALUES", "true")
         results = [
@@ -1686,14 +1691,15 @@ class TestTraceRedactValues:
             ),
         ]
         result = summarize_search_results(results)
-        assert result["top_urls"] == _REDACT_SENTINEL
+        assert result["top_urls"] == REDACT_SENTINEL
         assert result["result_count"] == 1
         # Non-sensitive fields must pass through.
         assert result["providers"] == ["openai"]
 
     def test_summarize_fetched_documents_redacts_urls(self, monkeypatch) -> None:
         from evidence_enrichment.core.models.contracts import RetrievedDocument
-        from evidence_enrichment.observability.langsmith import _REDACT_SENTINEL, summarize_fetched_documents
+        from evidence_enrichment.observability.redaction import REDACT_SENTINEL
+        from evidence_enrichment.observability.summarizers import summarize_fetched_documents
 
         monkeypatch.setenv("TRACE_REDACT_VALUES", "true")
         docs = [
@@ -1708,13 +1714,14 @@ class TestTraceRedactValues:
             )
         ]
         result = summarize_fetched_documents(docs)
-        assert result["urls"] == _REDACT_SENTINEL
+        assert result["urls"] == REDACT_SENTINEL
         assert result["document_count"] == 1
         assert result["success_count"] == 1
 
     def test_summarize_parsed_documents_redacts_nested_urls(self, monkeypatch) -> None:
         from evidence_enrichment.core.models.contracts import ParsedDocument
-        from evidence_enrichment.observability.langsmith import _REDACT_SENTINEL, summarize_parsed_documents
+        from evidence_enrichment.observability.redaction import REDACT_SENTINEL
+        from evidence_enrichment.observability.summarizers import summarize_parsed_documents
 
         monkeypatch.setenv("TRACE_REDACT_VALUES", "true")
         docs = [
@@ -1730,14 +1737,15 @@ class TestTraceRedactValues:
         assert result["document_count"] == 1
         nested = result["documents"]
         assert isinstance(nested, list)
-        assert nested[0]["url"] == _REDACT_SENTINEL
+        assert nested[0]["url"] == REDACT_SENTINEL
         # Non-sensitive nested fields must survive.
         assert nested[0]["title"] == "Title"
         assert nested[0]["text_chars"] == len("body text")
 
     def test_summarize_query_plan_redacts_primary_query_and_domain_hints(self, monkeypatch) -> None:
         from evidence_enrichment.core.models.contracts import SearchQueryPlan
-        from evidence_enrichment.observability.langsmith import _REDACT_SENTINEL, summarize_query_plan
+        from evidence_enrichment.observability.redaction import REDACT_SENTINEL
+        from evidence_enrichment.observability.summarizers import summarize_query_plan
 
         monkeypatch.setenv("TRACE_REDACT_VALUES", "true")
         plan = SearchQueryPlan(
@@ -1748,8 +1756,8 @@ class TestTraceRedactValues:
             domain_hints=["linkedin.com", "bloomberg.com"],
         )
         result = summarize_query_plan(plan)
-        assert result["primary_query"] == _REDACT_SENTINEL
-        assert result["domain_hints"] == _REDACT_SENTINEL
+        assert result["primary_query"] == REDACT_SENTINEL
+        assert result["domain_hints"] == REDACT_SENTINEL
         # Non-sensitive fields must survive.
         assert result["field_name"] == "ceo_name"
         assert result["query_variants"] == 2
@@ -1757,7 +1765,7 @@ class TestTraceRedactValues:
     def test_redaction_off_when_explicitly_disabled_for_url_and_query_fields(self, monkeypatch) -> None:
         """Ensure URL/query fields are NOT redacted when the flag is explicitly false."""
         from evidence_enrichment.core.models.contracts import ProviderType, SearchResult
-        from evidence_enrichment.observability.langsmith import summarize_search_results
+        from evidence_enrichment.observability.summarizers import summarize_search_results
 
         monkeypatch.setenv("TRACE_REDACT_VALUES", "false")
         results = [
@@ -1805,7 +1813,7 @@ class TestTraceRedactValues:
 def test_should_redact_stays_aligned_with_loaded_settings_until_reload(monkeypatch) -> None:
     """Direct env edits do not override the last successful Settings.load()."""
     from evidence_enrichment.config.settings import Settings, _reset_settings_cache
-    from evidence_enrichment.observability.langsmith import _should_redact
+    from evidence_enrichment.observability.redaction import should_redact as _should_redact
 
     _clear_obs_keys(monkeypatch)
     _reset_settings_cache()
@@ -1821,7 +1829,7 @@ def test_should_redact_stays_aligned_with_loaded_settings_until_reload(monkeypat
 
 def test_should_redact_runtime_override_beats_env(monkeypatch) -> None:
     """An injected runtime setting must override stale env-backed redaction state."""
-    from evidence_enrichment.observability.langsmith import _should_redact
+    from evidence_enrichment.observability.redaction import should_redact as _should_redact
     from evidence_enrichment.observability.runtime import (
         activate_runtime_observability_config,
         reset_runtime_observability_config,
@@ -1843,7 +1851,7 @@ def test_should_redact_prefers_last_loaded_settings_over_later_env_mutation(
 ) -> None:
     """Direct helper calls should stay aligned with the last loaded Settings."""
     from evidence_enrichment.config.settings import Settings, _reset_settings_cache
-    from evidence_enrichment.observability.langsmith import _should_redact
+    from evidence_enrichment.observability.redaction import should_redact as _should_redact
 
     _clear_all_obs_env(monkeypatch)
     env_file = tmp_path / "redaction.env"
@@ -1868,7 +1876,7 @@ def test_should_redact_does_not_trigger_settings_load(monkeypatch) -> None:
     of an otherwise read-only redaction check.
     """
     import evidence_enrichment.config.settings as settings_mod
-    from evidence_enrichment.observability.langsmith import _should_redact
+    from evidence_enrichment.observability.redaction import should_redact as _should_redact
 
     _clear_obs_keys(monkeypatch)
     settings_mod._reset_settings_cache()
@@ -1958,7 +1966,7 @@ class TestTracePayloadInputRedaction:
 
     def test_trace_payload_inputs_redacts_sensitive_keys(self) -> None:
         """trace_payload_inputs redacts primary_query and urls when flag is on."""
-        from evidence_enrichment.observability.langsmith import trace_payload_inputs
+        from evidence_enrichment.observability.summarizers import trace_payload_inputs
 
         os.environ["TRACE_REDACT_VALUES"] = "true"
         payload = {
@@ -1978,7 +1986,7 @@ class TestTracePayloadInputRedaction:
 
     def test_trace_payload_inputs_passes_through_when_explicitly_disabled(self) -> None:
         """trace_payload_inputs returns values unchanged when TRACE_REDACT_VALUES=false."""
-        from evidence_enrichment.observability.langsmith import trace_payload_inputs
+        from evidence_enrichment.observability.summarizers import trace_payload_inputs
 
         os.environ["TRACE_REDACT_VALUES"] = "false"
         payload = {
@@ -1994,7 +2002,7 @@ class TestTracePayloadInputRedaction:
 
     def test_trace_payload_inputs_redacts_document_urls_nested(self) -> None:
         """trace_payload_inputs redacts 'url' keys inside documents lists."""
-        from evidence_enrichment.observability.langsmith import trace_payload_inputs
+        from evidence_enrichment.observability.summarizers import trace_payload_inputs
 
         os.environ["TRACE_REDACT_VALUES"] = "true"
         payload = {
@@ -2013,7 +2021,7 @@ class TestTracePayloadInputRedaction:
     def test_record_stage_observation_input_redacted(self, monkeypatch) -> None:
         """record_stage_observation sends a redacted trace_payload as span input."""
         from evidence_enrichment.observability.langfuse import record_stage_observation
-        from evidence_enrichment.observability.langsmith import summarize_review_gate
+        from evidence_enrichment.observability.summarizers import summarize_review_gate
 
         os.environ["TRACE_REDACT_VALUES"] = "true"
 
@@ -2055,7 +2063,7 @@ class TestTracePayloadInputRedaction:
     ) -> None:
         """record_stage_observation passes trace_payload through unchanged when flag is false."""
         from evidence_enrichment.observability.langfuse import record_stage_observation
-        from evidence_enrichment.observability.langsmith import summarize_review_gate
+        from evidence_enrichment.observability.summarizers import summarize_review_gate
 
         os.environ["TRACE_REDACT_VALUES"] = "false"
 
@@ -2103,7 +2111,7 @@ class TestPerStageTracePayloadRedaction:
         os.environ.pop("TRACE_REDACT_VALUES", None)
 
     def _redact(self, payload: dict) -> dict:
-        from evidence_enrichment.observability.langsmith import _maybe_redact
+        from evidence_enrichment.observability.redaction import maybe_redact as _maybe_redact
         return _maybe_redact(payload)
 
     def test_query_plan_payload(self) -> None:
@@ -2190,7 +2198,7 @@ class TestPerStageTracePayloadRedaction:
     def test_synthesis_payload_via_summarize_claims(self) -> None:
         """summarize_claims is used as trace_payload base for synthesis stage."""
         from evidence_enrichment.core.models.contracts import FactClaim
-        from evidence_enrichment.observability.langsmith import summarize_claims
+        from evidence_enrichment.observability.summarizers import summarize_claims
 
         claims = [
             FactClaim(
@@ -2213,7 +2221,7 @@ class TestPerStageTracePayloadRedaction:
     def test_review_gate_payload(self) -> None:
         """review_gate trace_payload merges summarize_claims + summarize_synthesis."""
         from evidence_enrichment.core.models.contracts import FactClaim, SynthesisResult
-        from evidence_enrichment.observability.langsmith import summarize_claims, summarize_synthesis
+        from evidence_enrichment.observability.summarizers import summarize_claims, summarize_synthesis
 
         claims = [
             FactClaim(

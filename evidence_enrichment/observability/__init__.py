@@ -5,6 +5,22 @@ from evidence_enrichment.observability.langfuse import (
     flush_langfuse_traces,
     get_langfuse_client,
     record_stage_observation,
+)
+from evidence_enrichment.observability.langsmith import (
+    apply_langsmith_env,
+    flush_langsmith_traces,
+)
+from evidence_enrichment.observability.redaction import (
+    REDACT_SENTINEL,
+    maybe_redact,
+    should_redact,
+)
+from evidence_enrichment.observability.router import (
+    get_active_backends,
+    langsmith_wrapping_enabled,
+    resolve_backend,
+)
+from evidence_enrichment.observability.summarizers import (
     summarize_analysis_reports,
     summarize_analysis_stage,
     summarize_assessed_documents,
@@ -18,29 +34,29 @@ from evidence_enrichment.observability.langfuse import (
     summarize_synthesis_stage,
     trace_payload_inputs,
 )
-from evidence_enrichment.observability.langsmith import (
-    apply_langsmith_env,
-    flush_langsmith_traces,
-)
-from evidence_enrichment.observability.router import (
-    get_active_backends,
-    langsmith_wrapping_enabled,
-    resolve_backend,
-)
 from evidence_enrichment.observability.tracer import LocalTracer, TraceArtifacts
 
 __all__ = [
+    # Local tracer
     "LocalTracer",
     "TraceArtifacts",
+    # Langfuse adapter
     "apply_langfuse_env",
-    "apply_langsmith_env",
     "flush_langfuse_traces",
-    "flush_langsmith_traces",
-    "get_active_backends",
     "get_langfuse_client",
-    "langsmith_wrapping_enabled",
     "record_stage_observation",
+    # LangSmith adapter
+    "apply_langsmith_env",
+    "flush_langsmith_traces",
+    # Redaction
+    "REDACT_SENTINEL",
+    "maybe_redact",
+    "should_redact",
+    # Router
+    "get_active_backends",
+    "langsmith_wrapping_enabled",
     "resolve_backend",
+    # Summarizers
     "summarize_analysis_reports",
     "summarize_analysis_stage",
     "summarize_assessed_documents",

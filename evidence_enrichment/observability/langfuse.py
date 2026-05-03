@@ -8,8 +8,8 @@ import logging
 import os
 from typing import Any, Callable, Mapping
 
-# Re-export summarize_* helpers so both backends share them via __init__
-from evidence_enrichment.observability.langsmith import (  # noqa: F401
+# Re-export summarize_* helpers so callers can import them from either adapter
+from evidence_enrichment.observability.summarizers import (  # noqa: F401
     summarize_analysis_reports,
     summarize_analysis_stage,
     summarize_assessed_documents,
@@ -23,6 +23,7 @@ from evidence_enrichment.observability.langsmith import (  # noqa: F401
     summarize_synthesis_stage,
     trace_payload_inputs,
 )
+from evidence_enrichment.observability.redaction import maybe_redact
 from evidence_enrichment.observability.router import current_backend, get_active_backends
 from evidence_enrichment.observability.runtime import (
     OBSERVABILITY_STATE_LOCK,
@@ -259,11 +260,9 @@ def record_stage_observation(
     if client is None:
         return
     try:
-        from evidence_enrichment.observability.langsmith import _maybe_redact
-
         output_summary = summarizer(outputs)
         client.update_current_span(  # type: ignore[attr-defined]
-            input=_maybe_redact(trace_payload),
+            input=maybe_redact(trace_payload),
             output=output_summary,
         )
     except Exception as exc:

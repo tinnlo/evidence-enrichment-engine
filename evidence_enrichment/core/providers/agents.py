@@ -10,7 +10,7 @@ from evidence_enrichment.core.models.contracts import AnalysisReport, ConflictMa
 from evidence_enrichment.core.models.enums import ProviderType
 from evidence_enrichment.core.providers.base import AnalysisAgent, SynthesisAgent
 from evidence_enrichment.finops.models import LLMUsage, UsageSource
-from evidence_enrichment.observability.langsmith import _should_redact
+from evidence_enrichment.observability.redaction import should_redact as _should_redact
 from evidence_enrichment.observability.router import langsmith_tracing_ready
 
 if TYPE_CHECKING:

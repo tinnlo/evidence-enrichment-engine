@@ -77,7 +77,7 @@ from evidence_enrichment.core.quality.gates import (
 from evidence_enrichment.core.search.query_planner import score_search_result
 from evidence_enrichment.core.synthesis.replay import ReplaySynthesisAgent
 from evidence_enrichment.observability.langfuse import observe, record_stage_observation
-from evidence_enrichment.observability.langsmith import (
+from evidence_enrichment.observability.summarizers import (
     summarize_analysis_stage,
     summarize_assessed_documents,
     summarize_claims,
