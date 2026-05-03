@@ -92,7 +92,7 @@ class TestOpenAIAnalysisAgentUsage:
     @pytest.mark.asyncio
     async def test_captures_provider_reported_usage(self):
         """report.llm_usage reflects the token counts returned by the API."""
-        agent = OpenAIAnalysisAgent(api_key="test-key", model="gpt-4.1-mini")
+        agent = OpenAIAnalysisAgent(api_key="test-key", model="GPT-5.4")
         doc = _make_parsed_document()
 
         mock_usage = MagicMock()
@@ -119,7 +119,7 @@ class TestOpenAIAnalysisAgentUsage:
     @pytest.mark.asyncio
     async def test_falls_back_to_estimated_when_usage_none(self):
         """When response.usage is None, llm_usage uses ESTIMATED source with non-zero tokens."""
-        agent = OpenAIAnalysisAgent(api_key="test-key", model="gpt-4.1-mini")
+        agent = OpenAIAnalysisAgent(api_key="test-key", model="GPT-5.4")
         doc = _make_parsed_document()
 
         mock_response = MagicMock()
@@ -147,7 +147,7 @@ class TestAnthropicAnalysisAgentUsage:
     @pytest.mark.asyncio
     async def test_captures_provider_reported_usage(self):
         """Anthropic always returns usage; llm_usage should be PROVIDER_REPORTED."""
-        agent = AnthropicAnalysisAgent(api_key="test-key", model="claude-3-5-haiku-20241022")
+        agent = AnthropicAnalysisAgent(api_key="test-key", model="claude-sonnet-4.6")
         doc = _make_parsed_document()
 
         mock_usage = MagicMock()
@@ -183,7 +183,7 @@ class TestOpenAISynthesisAgentUsage:
     @pytest.mark.asyncio
     async def test_captures_provider_reported_usage(self):
         """synthesis.llm_usage reflects the token counts returned by the API."""
-        agent = OpenAISynthesisAgent(api_key="test-key", model="gpt-4.1-mini")
+        agent = OpenAISynthesisAgent(api_key="test-key", model="GPT-5.4")
         claims = _make_claims()
 
         mock_usage = MagicMock()
@@ -216,7 +216,7 @@ class TestAnthropicSynthesisAgentUsage:
     @pytest.mark.asyncio
     async def test_captures_provider_reported_usage(self):
         """Anthropic synthesis usage is always PROVIDER_REPORTED."""
-        agent = AnthropicSynthesisAgent(api_key="test-key", model="claude-3-5-haiku-20241022")
+        agent = AnthropicSynthesisAgent(api_key="test-key", model="claude-sonnet-4.6")
         claims = _make_claims()
 
         mock_usage = MagicMock()

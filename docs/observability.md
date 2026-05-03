@@ -320,8 +320,8 @@ finops:
   budget_mode: "off"           # off | warn | strict
   max_cost_usd_per_run: null   # optional budget cap
   max_cost_usd_per_success: null
-  openai_cheap_model: "gpt-4.1-nano"
-  anthropic_cheap_model: "claude-3-5-haiku-latest"
+  openai_cheap_model: "gpt-5-mini"
+  anthropic_cheap_model: "claude-sonnet-4.6"
   pricing_override: {}         # optional per-model price overrides
 ```
 

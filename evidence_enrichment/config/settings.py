@@ -341,8 +341,8 @@ class FinOpsSettings(BaseModel):
     budget_mode: str = "off"
     max_cost_usd_per_run: float | None = None
     max_cost_usd_per_success: float | None = None
-    openai_cheap_model: str = "gpt-4.1-nano"
-    anthropic_cheap_model: str = "claude-3-5-haiku-latest"
+    openai_cheap_model: str = "gpt-5-mini"
+    anthropic_cheap_model: str = "claude-sonnet-4.6"
     pricing_override: dict[str, dict[str, float]] = Field(default_factory=dict)
 
 
@@ -400,9 +400,9 @@ class Settings(BaseModel):
     observability_backend: str = "langfuse"
     trace_redact_values: bool = True
     openai_api_key: str | None = None
-    openai_model: str = "gpt-4.1-mini"
+    openai_model: str = "GPT-5.4"
     anthropic_api_key: str | None = None
-    anthropic_model: str = "claude-3-5-sonnet-latest"
+    anthropic_model: str = "claude-opus-4.7"
     serper_api_key: str | None = None
     tavily_api_key: str | None = None
 
@@ -465,7 +465,7 @@ class Settings(BaseModel):
                 data["openai_model"] = (
                     os.getenv("OPENAI_MODEL")
                     or env_values.get("OPENAI_MODEL")
-                    or data.get("openai_model", "gpt-4.1-mini")
+                    or data.get("openai_model", "GPT-5.4")
                 )
                 data["anthropic_api_key"] = os.getenv("ANTHROPIC_API_KEY") or env_values.get(
                     "ANTHROPIC_API_KEY"
@@ -473,7 +473,7 @@ class Settings(BaseModel):
                 data["anthropic_model"] = (
                     os.getenv("ANTHROPIC_MODEL")
                     or env_values.get("ANTHROPIC_MODEL")
-                    or data.get("anthropic_model", "claude-3-5-sonnet-latest")
+                    or data.get("anthropic_model", "claude-opus-4.7")
                 )
                 data["serper_api_key"] = os.getenv("SERPER_API_KEY") or env_values.get(
                     "SERPER_API_KEY"

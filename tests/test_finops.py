@@ -46,12 +46,12 @@ class TestPricingCatalog:
 
     def test_known_model_cost(self):
         catalog = PricingCatalog()
-        cost = catalog.cost_for_tokens("gpt-4.1-mini", 1_000_000, 0)
+        cost = catalog.cost_for_tokens("GPT-5.4", 1_000_000, 0)
         assert cost == pytest.approx(0.40, abs=1e-6)
 
     def test_output_tokens(self):
         catalog = PricingCatalog()
-        cost = catalog.cost_for_tokens("gpt-4.1-mini", 0, 1_000_000)
+        cost = catalog.cost_for_tokens("GPT-5.4", 0, 1_000_000)
         assert cost == pytest.approx(1.60, abs=1e-6)
 
     def test_unknown_model_zero_cost(self):
@@ -66,12 +66,12 @@ class TestPricingCatalog:
 
     def test_default_prices_preserved_with_overrides(self):
         catalog = build_catalog({"custom-model": {"input_per_1m": 1.0, "output_per_1m": 2.0}})
-        assert "gpt-4.1-mini" in catalog.prices
+        assert "GPT-5.4" in catalog.prices
 
 
 class TestStageCostRecord:
     def test_defaults(self):
-        rec = StageCostRecord(stage="analysis", provider="openai", model_name="gpt-4.1-mini")
+        rec = StageCostRecord(stage="analysis", provider="openai", model_name="GPT-5.4")
         assert rec.call_count == 0
         assert rec.usage_source == UsageSource.ESTIMATED
         assert rec.downgrade_applied == DowngradeAction.NONE
@@ -83,7 +83,7 @@ class TestEstimateStageCost:
         rec = estimate_stage_cost(
             stage="analysis",
             provider="openai",
-            model_name="gpt-4.1-mini",
+            model_name="GPT-5.4",
             input_text="a" * 4000,
             output_text="b" * 400,
             catalog=catalog,
@@ -123,7 +123,7 @@ class TestFinOpsCollector:
             StageCostRecord(
                 stage="analysis",
                 provider="openai",
-                model_name="gpt-4.1-mini",
+                model_name="GPT-5.4",
                 estimated_cost_usd=0.005,
                 estimated_input_tokens=1000,
                 estimated_output_tokens=200,
@@ -133,7 +133,7 @@ class TestFinOpsCollector:
             StageCostRecord(
                 stage="synthesis",
                 provider="openai",
-                model_name="gpt-4.1-mini",
+                model_name="GPT-5.4",
                 estimated_cost_usd=0.002,
                 estimated_input_tokens=500,
                 estimated_output_tokens=100,
@@ -142,7 +142,7 @@ class TestFinOpsCollector:
         summary = collector.build_summary(total_latency_ms=150.0)
         assert summary.total_estimated_cost_usd == pytest.approx(0.007, abs=1e-6)
         assert summary.cost_by_stage["analysis"] == pytest.approx(0.005, abs=1e-6)
-        assert summary.cost_by_model["gpt-4.1-mini"] == pytest.approx(0.007, abs=1e-6)
+        assert summary.cost_by_model["GPT-5.4"] == pytest.approx(0.007, abs=1e-6)
         assert summary.total_latency_ms == 150.0
         assert len(summary.stage_records) == 2
 
@@ -239,8 +239,8 @@ class TestFinOpsSettings:
         assert settings.enabled is True
         assert settings.budget_mode == "off"
         assert settings.max_cost_usd_per_run is None
-        assert settings.openai_cheap_model == "gpt-4.1-nano"
-        assert settings.anthropic_cheap_model == "claude-3-5-haiku-latest"
+        assert settings.openai_cheap_model == "gpt-5-mini"
+        assert settings.anthropic_cheap_model == "claude-sonnet-4.6"
 
     def test_settings_has_finops(self):
         settings = Settings()
@@ -262,14 +262,14 @@ class TestSpanRecordFinOps:
         span = SpanRecord(
             trace_id="t1", stage="analysis", provider="openai", mode="live",
             latency_ms=100.0, entity_id="e1", field="hq_country",
-            model_name="gpt-4.1-mini",
+            model_name="GPT-5.4",
             estimated_input_tokens=1000,
             estimated_output_tokens=200,
             estimated_total_tokens=1200,
             estimated_cost_usd=0.00072,
             budget_status="nominal",
         )
-        assert span.model_name == "gpt-4.1-mini"
+        assert span.model_name == "GPT-5.4"
         assert span.estimated_cost_usd == pytest.approx(0.00072)
 
 
@@ -294,16 +294,16 @@ class TestLocalTracerFinOps:
     def test_span_finops_passthrough(self):
         tracer = LocalTracer(mode="replay", entity_id="e1", field_name="hq_country")
         with tracer.span("analysis", provider="openai") as payload:
-            payload["model_name"] = "gpt-4.1-mini"
+            payload["model_name"] = "GPT-5.4"
             payload["estimated_cost_usd"] = 0.001
         assert len(tracer.spans) == 1
-        assert tracer.spans[0].model_name == "gpt-4.1-mini"
+        assert tracer.spans[0].model_name == "GPT-5.4"
         assert tracer.spans[0].estimated_cost_usd == pytest.approx(0.001)
 
     def test_write_with_finops_data(self, tmp_path):
         tracer = LocalTracer(mode="replay", entity_id="e1", field_name="hq_country")
         with tracer.span("analysis", provider="openai") as payload:
-            payload["model_name"] = "gpt-4.1-mini"
+            payload["model_name"] = "GPT-5.4"
             payload["estimated_cost_usd"] = 0.001
         artifacts = tracer.write(
             tmp_path,
@@ -326,10 +326,10 @@ class TestLocalTracerFinOps:
     def test_summary_populates_cost_fields(self, tmp_path):
         tracer = LocalTracer(mode="replay", entity_id="e1", field_name="hq_country")
         with tracer.span("analysis", provider="openai") as payload:
-            payload["model_name"] = "gpt-4.1-mini"
+            payload["model_name"] = "GPT-5.4"
             payload["estimated_cost_usd"] = 0.001
         with tracer.span("synthesis", provider="openai") as payload:
-            payload["model_name"] = "gpt-4.1-mini"
+            payload["model_name"] = "GPT-5.4"
             payload["estimated_cost_usd"] = 0.0005
         artifacts = tracer.write(tmp_path)
         import json
@@ -340,12 +340,12 @@ class TestLocalTracerFinOps:
     def test_timeline_includes_cost(self, tmp_path):
         tracer = LocalTracer(mode="replay", entity_id="e1", field_name="hq_country")
         with tracer.span("analysis", provider="openai") as payload:
-            payload["model_name"] = "gpt-4.1-mini"
+            payload["model_name"] = "GPT-5.4"
             payload["estimated_cost_usd"] = 0.001
         artifacts = tracer.write(tmp_path)
         timeline = artifacts.timeline_path.read_text()
         assert "cost=$" in timeline
-        assert "model=gpt-4.1-mini" in timeline
+        assert "model=GPT-5.4" in timeline
 
 
 class TestPipelineRunResultFinOps:

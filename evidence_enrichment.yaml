@@ -32,8 +32,8 @@ retrieval:
 finops:
   enabled: true
   budget_mode: "off"
-  openai_cheap_model: "gpt-4.1-nano"
-  anthropic_cheap_model: "claude-3-5-haiku-latest"
+  openai_cheap_model: "gpt-5-mini"
+  anthropic_cheap_model: "claude-sonnet-4.6"
 
 # Execution policy governs capability (which live surfaces the agent may use).
 # Separate from finops, which governs cost.
@@ -50,4 +50,6 @@ execution_policy:
     - remote_tracing
     - live_provider_calls
     - mcp_live_runs
+
+ns
 

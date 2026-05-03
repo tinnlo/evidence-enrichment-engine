@@ -166,8 +166,8 @@ Key capabilities:
 finops:
   enabled: true
   budget_mode: "off"
-  openai_cheap_model: "gpt-4.1-nano"
-  anthropic_cheap_model: "claude-3-5-haiku-latest"
+  openai_cheap_model: "gpt-5-mini"
+  anthropic_cheap_model: "claude-sonnet-4.6"
 ```
 
 Costs are **estimated**, not billed. See [docs/observability.md](docs/observability.md) for details.

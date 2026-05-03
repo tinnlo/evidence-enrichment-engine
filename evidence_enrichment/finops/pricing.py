@@ -15,29 +15,25 @@ from pydantic import BaseModel
 CATALOG_VERSION = "2025-01-01"
 
 DEFAULT_PRICES: dict[str, dict[str, float]] = {
-    "gpt-4.1-mini": {
-        "input_per_1m": 0.40,
-        "output_per_1m": 1.60,
+    "GPT-5.5": {
+        "input_per_1m": 5.00,
+        "output_per_1m": 30.00,
     },
-    "gpt-4.1-nano": {
-        "input_per_1m": 0.10,
-        "output_per_1m": 0.40,
-    },
-    "gpt-4o-mini": {
-        "input_per_1m": 0.15,
-        "output_per_1m": 0.60,
-    },
-    "gpt-4o": {
+    "GPT-5.4": {
         "input_per_1m": 2.50,
-        "output_per_1m": 10.00,
-    },
-    "claude-3-5-sonnet-latest": {
-        "input_per_1m": 3.00,
         "output_per_1m": 15.00,
     },
-    "claude-3-5-haiku-latest": {
-        "input_per_1m": 0.80,
-        "output_per_1m": 4.00,
+    "gpt-5-mini": {
+        "input_per_1m": 0.25,
+        "output_per_1m": 2.00,
+    },
+    "claude-opus-4.7": {
+        "input_per_1m": 5.00,
+        "output_per_1m": 25.00,
+    },
+    "claude-sonnet-4.6": {
+        "input_per_1m": 3.00,
+        "output_per_1m": 15.00,
     },
     "text-embedding-3-small": {
         "input_per_1m": 0.02,
