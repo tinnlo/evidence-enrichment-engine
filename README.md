@@ -10,7 +10,7 @@
 | Context pack as runtime data | Stage-scoped instructions live in files, resolve into `resolved_context.json`, and stay inspectable after every run. |
 | Explicit evidence pipeline | Query planning, search, fetch, parse, assessment, analysis, synthesis, and review are separate stages with local traces. |
 | Optional LangGraph retrieval path | Retrieval can stay off, run as local RAG, or run as a stateful retrieve-evaluate-refine loop without changing the base artifact contract. |
-| Langfuse-first observability | `OBSERVABILITY_BACKEND` routes traces to Langfuse, LangSmith, both, or neither while local artifacts remain on by default. |
+| Langfuse-first observability | `OBSERVABILITY_BACKEND` routes traces to Langfuse, LangSmith, both, or neither while local artifacts remain on by default. Redaction and summarizer helpers live in vendor-agnostic core modules (`redaction.py`, `summarizers.py`) so neither adapter owns shared privacy logic. |
 | AI FinOps for agentic workflows | Per-stage cost estimation, budget-aware execution, and quality/latency/cost tradeoff reporting — all deterministic and replay-friendly. |
 | Execution policy layer | `off\|audit\|enforce` mode governs which live-capability surfaces are permitted. Policy decisions are recorded in `execution_policy.json` separately from FinOps artifacts. |
 | MCP surface | MCP-compatible clients can invoke the replay-safe workflow without inventing a second integration layer. |
@@ -149,6 +149,17 @@ Privacy note:
 
 See [docs/observability.md](docs/observability.md) for backend setup, redaction rules, credential eviction, and process-global caveats.
 
+The observability layer is structured as:
+
+| Module | Role |
+|---|---|
+| `observability/redaction.py` | Vendor-agnostic redaction constants and helpers (`should_redact`, `maybe_redact`) |
+| `observability/summarizers.py` | Vendor-agnostic stage summarizers (`summarize_*`, `trace_payload_inputs`) |
+| `observability/langfuse.py` | Langfuse adapter: env sync, client, flush, `observe` decorator, `record_stage_observation` |
+| `observability/langsmith.py` | LangSmith adapter: env sync, client, flush |
+| `observability/router.py` | Backend selector (`OBSERVABILITY_BACKEND` resolution) |
+| `observability/runtime.py` | Task-local config, credential eviction, policy-gated activation |
+
 ## AI FinOps
 
 The pipeline includes cost-aware model routing and budget-aware execution so every run produces machine-readable cost attribution alongside quality and latency metrics.
@@ -219,6 +230,7 @@ The retrieval layer is optional and deliberately scoped. It exists to show a sta
 
 - `local` mode adds `retrieval_indexing` and `retrieval_query` stages between `evidence_assessment` and `analysis`.
 - `agent` mode uses a LangGraph `StateGraph` for retrieve-evaluate-refine iteration and records `agent_iterations` in the `retrieval_query` span.
+- The `retrieval_query` span includes a `retrieval_score_breakdown` field listing per-chunk vector, keyword, table-boost, and fused scores — inspectable in `spans.jsonl`.
 - Retrieval is document-scoped, so each `FactClaim.source_url` stays attributable to the document that produced it.
 
 See [docs/retrieval.md](docs/retrieval.md) for chunking, scoring, config, and the LangGraph loop.
