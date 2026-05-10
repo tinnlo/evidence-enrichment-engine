@@ -382,6 +382,29 @@ class ExecutionPolicySettings(BaseModel):
     )
 
 
+class CacheSettings(BaseModel):
+    """Redis cache configuration for fetch and assessment stages.
+
+    Cache-aside pattern with mode isolation to preserve replay determinism.
+    When enabled, caches fetch results (24h TTL) and assessment scores (7d TTL).
+
+    Mode isolation ensures replay and live caches don't cross-contaminate:
+    - Cache keys include execution mode (live/replay/auto)
+    - Replay mode can bypass cache entirely or use isolated keys
+
+    Graceful degradation: if Redis is unavailable, pipeline continues without cache.
+    """
+
+    enabled: bool = False
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_password: str | None = None
+    redis_db: int = 0
+    max_connections: int = 10
+    fetch_ttl_seconds: int = 24 * 3600  # 24 hours
+    assessment_ttl_seconds: int = 7 * 24 * 3600  # 7 days
+
+
 class Settings(BaseModel):
     default_mode: str = "auto"
     replay_dir: str = "examples/replay"
@@ -397,6 +420,7 @@ class Settings(BaseModel):
     guardrails: GuardrailsSettings = Field(default_factory=GuardrailsSettings)
     finops: FinOpsSettings = Field(default_factory=FinOpsSettings)
     execution_policy: ExecutionPolicySettings = Field(default_factory=ExecutionPolicySettings)
+    cache: CacheSettings = Field(default_factory=CacheSettings)
     observability_backend: str = "langfuse"
     trace_redact_values: bool = True
     openai_api_key: str | None = None
@@ -508,6 +532,37 @@ class Settings(BaseModel):
                 )
                 if redact_raw is not None:
                     data["trace_redact_values"] = str(redact_raw).strip().lower() in ("1", "true", "yes", "on")
+
+                # Cache: merge env overrides into existing YAML subtree
+                cache_subtree: dict[str, Any] = dict(data.get("cache") or {})
+                cache_enabled_raw = os.getenv("CACHE_ENABLED") or env_values.get("CACHE_ENABLED")
+                if cache_enabled_raw is not None:
+                    cache_subtree["enabled"] = str(cache_enabled_raw).strip().lower() in ("1", "true", "yes", "on")
+                if os.getenv("REDIS_HOST") or env_values.get("REDIS_HOST"):
+                    cache_subtree["redis_host"] = os.getenv("REDIS_HOST") or env_values.get("REDIS_HOST")
+                if os.getenv("REDIS_PORT") or env_values.get("REDIS_PORT"):
+                    try:
+                        cache_subtree["redis_port"] = int(os.getenv("REDIS_PORT") or env_values.get("REDIS_PORT"))
+                    except (ValueError, TypeError):
+                        pass
+                if os.getenv("REDIS_PASSWORD") or env_values.get("REDIS_PASSWORD"):
+                    cache_subtree["redis_password"] = os.getenv("REDIS_PASSWORD") or env_values.get("REDIS_PASSWORD")
+                if os.getenv("REDIS_DB") or env_values.get("REDIS_DB"):
+                    try:
+                        cache_subtree["redis_db"] = int(os.getenv("REDIS_DB") or env_values.get("REDIS_DB"))
+                    except (ValueError, TypeError):
+                        pass
+                if os.getenv("FETCH_TTL_SECONDS") or env_values.get("FETCH_TTL_SECONDS"):
+                    try:
+                        cache_subtree["fetch_ttl_seconds"] = int(os.getenv("FETCH_TTL_SECONDS") or env_values.get("FETCH_TTL_SECONDS"))
+                    except (ValueError, TypeError):
+                        pass
+                if os.getenv("ASSESSMENT_TTL_SECONDS") or env_values.get("ASSESSMENT_TTL_SECONDS"):
+                    try:
+                        cache_subtree["assessment_ttl_seconds"] = int(os.getenv("ASSESSMENT_TTL_SECONDS") or env_values.get("ASSESSMENT_TTL_SECONDS"))
+                    except (ValueError, TypeError):
+                        pass
+                data["cache"] = cache_subtree
 
                 # Validate the Settings object before committing any env/cache changes.
                 instance = cls(**data)

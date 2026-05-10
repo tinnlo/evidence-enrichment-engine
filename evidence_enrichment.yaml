@@ -51,3 +51,14 @@ execution_policy:
     - live_provider_calls
     - mcp_live_runs
 
+# Redis cache for fetch and assessment stages (cache-aside pattern).
+# Mode-isolated keys preserve replay determinism.
+# Graceful degradation: pipeline continues if Redis unavailable.
+cache:
+  enabled: false
+  redis_host: localhost
+  redis_port: 6379
+  redis_db: 0
+  max_connections: 10
+  fetch_ttl_seconds: 86400      # 24 hours
+  assessment_ttl_seconds: 604800  # 7 days

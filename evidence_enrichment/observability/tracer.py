@@ -37,6 +37,12 @@ class SpanRecord(BaseModel):
     downgrade_applied: str | None = None
     retrieval_score_breakdown: list[dict] | None = None
 
+    # Cache metadata
+    cache_hits: int | None = None
+    cache_misses: int | None = None
+    cache_stale: int | None = None
+    cache_enabled: bool | None = None
+
 
 class TraceSummary(BaseModel):
     trace_id: str
@@ -192,10 +198,13 @@ class LocalTracer:
             downgrade_str = ""
             if span.downgrade_applied and span.downgrade_applied != "none":
                 downgrade_str = f" | downgrade={span.downgrade_applied}"
+            cache_str = ""
+            if span.cache_hits is not None:
+                cache_str = f" | cache: {span.cache_hits} hits, {span.cache_misses} misses, {span.cache_stale} stale"
             timeline_lines.append(
                 f"{index}. `{span.stage}` | provider=`{span.provider}` | "
                 f"latency_ms={span.latency_ms} | input={span.input_count} | "
-                f"output={span.output_count}{model_str}{cost_str}{downgrade_str}"
+                f"output={span.output_count}{model_str}{cost_str}{downgrade_str}{cache_str}"
             )
         timeline_path.write_text("\n".join(timeline_lines) + "\n", encoding="utf-8")
 

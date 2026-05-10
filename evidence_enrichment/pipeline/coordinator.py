@@ -161,6 +161,24 @@ class EvidenceCoordinator:
         # Same pattern for policy run context.
         self._ephemeral_prc: _PolicyRunContext | None = None
 
+        # Initialize cache client if enabled
+        self._cache = None
+        if self.settings.cache.enabled:
+            try:
+                from evidence_enrichment.cache.client import RedisCache
+
+                self._cache = RedisCache(
+                    host=self.settings.cache.redis_host,
+                    port=self.settings.cache.redis_port,
+                    db=self.settings.cache.redis_db,
+                    password=self.settings.cache.redis_password,
+                    max_connections=self.settings.cache.max_connections,
+                )
+                logging.info("Redis cache initialized")
+            except Exception as exc:
+                logging.warning(f"Cache initialization failed: {exc}")
+                self._cache = None
+
     @property
     def _frc(self) -> _FinOpsRunContext:
         """Return the FinOps run context for the current async task.
@@ -850,7 +868,50 @@ class EvidenceCoordinator:
                 "fetch", trace_payload, result, summarize_fetched_documents
             )
             return result
-        result = await self._fetch_documents(search_results)
+
+        # Cache integration with mode isolation
+        mode = trace_payload.get("mode", "auto")
+        if self._cache and self._cache.is_available():
+            from evidence_enrichment.cache.middleware import fetch_with_cache
+
+            result = []
+            cache_hits = 0
+            cache_misses = 0
+            cache_stale = 0
+            fetch_failures = 0
+
+            for search_result in search_results[:3]:  # Match coordinator limit
+                try:
+                    doc, metadata = await fetch_with_cache(
+                        url=search_result.url,
+                        mode=mode,
+                        cache=self._cache,
+                        ttl_seconds=self.settings.cache.fetch_ttl_seconds,
+                        fetch_fn=lambda sr=search_result: self.fetcher.fetch(sr),
+                    )
+                    result.append(doc)
+
+                    if metadata.status == "hit":
+                        cache_hits += 1
+                    elif metadata.status == "miss":
+                        cache_misses += 1
+                    elif metadata.status == "stale":
+                        cache_stale += 1
+                except Exception as exc:
+                    fetch_failures += 1
+                    logging.warning("fetch failed for %s: %s", search_result.url, exc)
+
+            if search_results and not result:
+                raise RuntimeError("All fetch attempts failed")
+
+            # Inject cache metadata into trace payload
+            trace_payload["cache_hits"] = cache_hits
+            trace_payload["cache_misses"] = cache_misses
+            trace_payload["cache_stale"] = cache_stale
+            trace_payload["fetch_failures"] = fetch_failures
+        else:
+            result = await self._fetch_documents(search_results)
+
         record_stage_observation(
             "fetch", trace_payload, result, summarize_fetched_documents
         )
@@ -903,7 +964,7 @@ class EvidenceCoordinator:
         process_inputs=trace_payload_inputs,
         process_outputs=summarize_assessed_documents,
     )
-    def _stage_evidence_assessment(
+    async def _stage_evidence_assessment(
         self,
         parsed_documents: list[ParsedDocument],
         *,
@@ -919,10 +980,47 @@ class EvidenceCoordinator:
                 summarize_assessed_documents,
             )
             return parsed_documents
-        result = [
-            self.assessor.assess(document, company_name)
-            for document in parsed_documents
-        ]
+
+        # Cache integration with mode isolation
+        mode = trace_payload.get("mode", "auto")
+        if self._cache and self._cache.is_available():
+            from evidence_enrichment.cache.middleware import assess_with_cache
+            import asyncio
+
+            result = []
+            cache_hits = 0
+            cache_misses = 0
+            cache_stale = 0
+
+            for doc in parsed_documents:
+                # Assessment cache is async
+                assessed_doc, metadata = await assess_with_cache(
+                    parsed_doc=doc,
+                    company_name=company_name,
+                    mode=mode,
+                    cache=self._cache,
+                    ttl_seconds=self.settings.cache.assessment_ttl_seconds,
+                    assess_fn=lambda d=doc: self.assessor.assess(d, company_name),
+                )
+                result.append(assessed_doc)
+
+                if metadata.status == "hit":
+                    cache_hits += 1
+                elif metadata.status == "miss":
+                    cache_misses += 1
+                elif metadata.status == "stale":
+                    cache_stale += 1
+
+            # Inject cache metadata into trace payload
+            trace_payload["cache_hits"] = cache_hits
+            trace_payload["cache_misses"] = cache_misses
+            trace_payload["cache_stale"] = cache_stale
+        else:
+            result = [
+                self.assessor.assess(document, company_name)
+                for document in parsed_documents
+            ]
+
         record_stage_observation(
             "evidence_assessment", trace_payload, result, summarize_assessed_documents
         )
@@ -1282,7 +1380,7 @@ class EvidenceCoordinator:
             provider="local_rules",
             input_count=len(parsed_documents),
         ) as span:
-            assessed_documents = self._stage_evidence_assessment(
+            assessed_documents = await self._stage_evidence_assessment(
                 parsed_documents,
                 company_name=company_name,
                 bundle=None,
@@ -1716,7 +1814,7 @@ class EvidenceCoordinator:
         with tracer.span(
             "evidence_assessment", provider="replay", input_count=len(parsed_documents)
         ) as span:
-            parsed_documents = self._stage_evidence_assessment(
+            parsed_documents = await self._stage_evidence_assessment(
                 parsed_documents,
                 company_name=str(
                     entity.get("name") or entity.get("company_name") or ""

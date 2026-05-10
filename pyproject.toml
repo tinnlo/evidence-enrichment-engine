@@ -13,6 +13,7 @@ dependencies = [
   "langsmith>=0.3.0",
   "pydantic>=2.7.0",
   "pyyaml>=6.0.1",
+  "redis[hiredis]>=5.0.0",
   "rich>=13.7.0",
   "typer>=0.12.3",
 ]
