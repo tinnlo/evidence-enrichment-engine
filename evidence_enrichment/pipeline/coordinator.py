@@ -985,7 +985,6 @@ class EvidenceCoordinator:
         mode = trace_payload.get("mode", "auto")
         if self._cache and self._cache.is_available():
             from evidence_enrichment.cache.middleware import assess_with_cache
-            import asyncio
 
             result = []
             cache_hits = 0

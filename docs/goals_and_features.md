@@ -93,6 +93,7 @@ style OUTPUTS fill:transparent,stroke:#e65100,stroke-width:1px,stroke-dasharray:
 | Guardrails | Post-synthesis checks can reject low-confidence or invalid outputs before return. | The final answer is gated by policy rather than treated as automatically safe. |
 | AI FinOps | Per-stage cost estimation, budget-aware execution policies, and quality/latency/cost tradeoff reporting. | The workflow measures cost, enforces budgets, and shows tradeoffs in a reproducible way. |
 | Execution Policy | Capability-governance layer (`off` / `audit` / `enforce`) that gates live actions (search, fetch, retrieval, remote tracing, MCP live runs) independently of cost controls. | Operators can restrict which live surfaces are permitted at runtime without touching FinOps config. |
+| GCP Deployment | Production-ready Terraform infrastructure for Cloud Run Jobs with Memorystore Redis, Secret Manager, and Cloud Scheduler. | The pipeline can be deployed to GCP as a scheduled batch processor with full observability and cost optimization. |
 
 ## Observability Positioning
 

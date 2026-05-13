@@ -10,7 +10,6 @@ from evidence_enrichment.cache.models import (
     CachedAssessmentResult,
     is_stale,
     FETCH_STALE_THRESHOLD,
-    ASSESSMENT_STALE_THRESHOLD,
 )
 
 

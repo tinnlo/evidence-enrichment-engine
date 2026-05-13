@@ -354,6 +354,51 @@ docker compose run --rm pipeline evidence-enrich eval
 docker compose run --rm pipeline evidence-enrich demo --mode auto
 ```
 
+## GCP Deployment
+
+The pipeline can be deployed to Google Cloud Platform as a scheduled batch processor using Cloud Run Jobs with Terraform infrastructure.
+
+### Architecture
+
+- **Cloud Run Jobs** for batch execution (not HTTP service)
+- **Memorystore Redis** for caching (24h documents, 7d evidence)
+- **Secret Manager** for API keys (Langfuse + 4 provider keys)
+- **Cloud Scheduler** for periodic triggers via OAuth token
+- **GCS bucket** for trace artifacts
+- **VPC Connector** for Cloud Run to Redis connectivity
+
+### Quick Start
+
+```bash
+# Set environment (dev, staging, or prod)
+export ENVIRONMENT=dev
+
+# Initialize Terraform with remote state
+terraform -chdir=terraform/gcp init \
+  -backend-config="bucket=${ENVIRONMENT}-evidence-enrichment-tfstate" \
+  -backend-config="prefix=terraform/state"
+
+# Review plan
+terraform -chdir=terraform/gcp plan \
+  -var-file="../environments/${ENVIRONMENT}.tfvars"
+
+# Apply infrastructure
+terraform -chdir=terraform/gcp apply \
+  -var-file="../environments/${ENVIRONMENT}.tfvars"
+```
+
+### Cost Estimation
+
+| Environment | Monthly Cost | Key Resources |
+|---|---|---|
+| Dev | $40-50 | Basic Redis (1GB), minimal job executions |
+| Staging | $60-80 | Basic Redis (2GB), moderate job executions |
+| Prod | $200-250 | Standard Redis (5GB) with HA, hourly job executions |
+
+See [docs/deployment_gcp.md](docs/deployment_gcp.md) for complete deployment guide, prerequisites, and operational details.
+
+See [docs/architecture_decisions.md](docs/architecture_decisions.md) for rationale behind Cloud Run Jobs choice, Redis caching strategy, and execution policy design.
+
 ## CI And Development
 
 GitHub Actions CI lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) and currently:

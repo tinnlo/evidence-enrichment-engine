@@ -202,7 +202,6 @@ class TestAssessWithCache:
 
     async def test_cache_miss_calls_assess_fn(self, redis_cache):
         """Verify cache miss calls assessment function."""
-        from unittest.mock import MagicMock
         from evidence_enrichment.core.models.contracts import ParsedDocument
         from evidence_enrichment.core.models.enums import DocumentType
 
@@ -253,7 +252,6 @@ class TestAssessWithCache:
 
     async def test_cache_hit_skips_assess_fn(self, redis_cache):
         """Verify cache hit skips assessment function."""
-        from unittest.mock import MagicMock
 
         # Create mock ParsedDocument
         parsed_doc = MagicMock()
@@ -266,8 +264,6 @@ class TestAssessWithCache:
         mode = "live"
 
         # Pre-populate cache
-        from evidence_enrichment.cache.keys import generate_assessment_key
-        from evidence_enrichment.cache.models import CachedAssessmentResult
 
         key = generate_assessment_key(
             mode=mode,
