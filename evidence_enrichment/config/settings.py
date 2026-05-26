@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from evidence_enrichment.observability.langfuse import apply_langfuse_env
 from evidence_enrichment.observability.langsmith import apply_langsmith_env
@@ -308,7 +308,7 @@ class RetrievalConfig(BaseModel):
     persist_path:
         Directory for Chroma persistent storage.
     chunk_size:
-        Target character count per text chunk.
+        Target character count per text chunk (used by the flat/TableAware chunker).
     overlap:
         Character overlap between consecutive text chunks.
     max_table_size:
@@ -318,9 +318,39 @@ class RetrievalConfig(BaseModel):
     embedding_model:
         OpenAI embedding model name.
     weights:
-        Hybrid scoring weights (vector, keyword, table_boost).
+        DEPRECATED — use ``hybrid_weights``. Kept as a no-op alias for backward
+        compatibility.  Setting this to a non-default value while leaving
+        ``hybrid_weights`` at its default will copy the value across and emit a
+        DeprecationWarning.
+    hybrid_weights:
+        Hybrid scoring weights for ``HybridRetriever``: (vector, keyword, table_boost).
+        Must sum to 1.0.
+    hierarchical_weights:
+        Scoring weights for ``HierarchicalRetriever`` Stage-2 re-ranking:
+        (vector, keyword, table_boost, role_section_summary, role_table).
+        Must sum to 1.0.
     min_doc_chars:
         Minimum document character count to index; shorter docs are skipped.
+    chunker:
+        "flat" (default) — use TableAwareChunker (char-based, backward compat).
+        "hierarchical" — use HierarchicalChunker (section-aware, token-based).
+    retriever:
+        "hybrid" (default) — use HybridRetriever.
+        "hierarchical" — use HierarchicalRetriever (two-stage section-pruning).
+    target_chunk_tokens:
+        Token budget per content chunk for HierarchicalChunker. Default 400.
+    max_chunk_tokens:
+        Hard token ceiling per chunk for HierarchicalChunker. Default 800.
+    overlap_tokens:
+        Token overlap between consecutive chunks for HierarchicalChunker. Default 80.
+    section_top_k:
+        Stage-1 section candidates for HierarchicalRetriever. Default 3.
+    section_min_score:
+        Minimum cosine similarity for a section to pass Stage-1. Default 0.25.
+    schema_validation:
+        Enable Stage-C typed schema extraction. Default False.
+    schema_repair_max_attempts:
+        LLM repair loop iterations when schema validation fails. Default 2.
     """
 
     mode: str = "off"  # "off" | "local"
@@ -330,8 +360,52 @@ class RetrievalConfig(BaseModel):
     max_table_size: int = 4000
     top_k: int = 5
     embedding_model: str = "text-embedding-3-small"
+    # Deprecated alias — kept for backward compat only.
     weights: tuple[float, float, float] = (0.7, 0.2, 0.1)
+    hybrid_weights: tuple[float, float, float] = (0.7, 0.2, 0.1)
+    hierarchical_weights: tuple[float, float, float, float, float] = (0.5, 0.15, 0.1, 0.15, 0.1)
     min_doc_chars: int = 2000
+    # Chunker / retriever selection
+    chunker: str = "flat"       # "flat" | "hierarchical"
+    retriever: str = "hybrid"   # "hybrid" | "hierarchical"
+    # HierarchicalChunker options
+    target_chunk_tokens: int = 400
+    max_chunk_tokens: int = 800
+    overlap_tokens: int = 80
+    # HierarchicalRetriever Stage-1 options
+    section_top_k: int = 3
+    section_min_score: float = 0.25
+    # Stage C — typed schema extraction
+    schema_validation: bool = False
+    schema_repair_max_attempts: int = 2
+
+    @model_validator(mode="after")
+    def _coerce_chunker_for_hierarchical_retriever(self) -> "RetrievalConfig":
+        """Promote chunker to 'hierarchical' when retriever='hierarchical' and user left it at default."""
+        if self.retriever == "hierarchical" and self.chunker == "flat":
+            import warnings
+            warnings.warn(
+                "retriever='hierarchical' requires section metadata — promoting chunker to 'hierarchical'. "
+                "Set chunker='hierarchical' explicitly to suppress this warning.",
+                UserWarning,
+                stacklevel=2,
+            )
+            self.chunker = "hierarchical"
+        return self
+
+    @model_validator(mode="after")
+    def _migrate_deprecated_weights(self) -> "RetrievalConfig":
+        """Copy deprecated ``weights`` into ``hybrid_weights`` when set non-default."""
+        _default = (0.7, 0.2, 0.1)
+        if self.weights != _default and self.hybrid_weights == _default:
+            import warnings
+            warnings.warn(
+                "RetrievalConfig.weights is deprecated — use hybrid_weights instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.hybrid_weights = self.weights
+        return self
 
 
 class FinOpsSettings(BaseModel):

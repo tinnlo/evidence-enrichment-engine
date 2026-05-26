@@ -20,13 +20,25 @@ _STYLE_RE = re.compile(r"<style.*?</style>", re.IGNORECASE | re.DOTALL)
 
 _MAX_REDIRECTS = 10
 _ALLOWED_SCHEMES = {"http", "https"}
-_MAX_BODY_BYTES = 5 * 1024 * 1024  # 5 MB
+_MAX_BODY_BYTES = 5 * 1024 * 1024   # 5 MB — text/HTML responses
+_MAX_PDF_BYTES = 50 * 1024 * 1024   # 50 MB — PDF responses
 _ALLOWED_CONTENT_PREFIXES = (
     "text/",
     "application/json",
     "application/xml",
     "application/xhtml",
 )
+
+# Populated only when PDFStructuredParser (and its deps) can be imported.
+# Probing the parser module — not individual packages — keeps the fetch gate
+# and parser registration gate in sync: if either pdfplumber or pymupdf is
+# absent the import fails and PDFs remain blocked exactly as today.
+_ALLOWED_BINARY_PREFIXES: tuple[str, ...] = ()
+try:
+    from evidence_enrichment.core.parse.pdf_structured import PDFStructuredParser as _  # noqa: F401
+    _ALLOWED_BINARY_PREFIXES = ("application/pdf",)
+except ImportError:
+    pass
 
 
 async def _validate_host(hostname: str) -> None:
@@ -75,9 +87,17 @@ async def _validate_url(url: str) -> None:
 
 def _check_content_type(content_type: str, url: str) -> None:
     ct = content_type.split(";")[0].strip().lower()
-    if ct and not ct.startswith(_ALLOWED_CONTENT_PREFIXES):
+    if ct and not (
+        ct.startswith(_ALLOWED_CONTENT_PREFIXES)
+        or ct.startswith(_ALLOWED_BINARY_PREFIXES)
+    ):
         logging.warning("Skipping non-text content type %s for %s", ct, url)
         raise ValueError(f"Blocked non-text content type: {ct} for {url}")
+
+
+def _is_binary_content_type(content_type: str) -> bool:
+    ct = content_type.split(";")[0].strip().lower()
+    return bool(_ALLOWED_BINARY_PREFIXES) and ct.startswith(_ALLOWED_BINARY_PREFIXES)
 
 
 class DocumentFetcher:
@@ -94,11 +114,17 @@ class DocumentFetcher:
                     if not response.is_redirect:
                         # Check Content-Length before reading any bytes
                         cl_header = response.headers.get("content-length")
+                        content_type_early = response.headers.get("content-type", "text/html")
+                        early_size_limit = (
+                            _MAX_PDF_BYTES
+                            if _is_binary_content_type(content_type_early)
+                            else _MAX_BODY_BYTES
+                        )
                         if cl_header is not None:
                             try:
-                                if int(cl_header) > _MAX_BODY_BYTES:
+                                if int(cl_header) > early_size_limit:
                                     raise ValueError(
-                                        f"Content-Length {cl_header} exceeds {_MAX_BODY_BYTES} bytes for {url}"
+                                        f"Content-Length {cl_header} exceeds {early_size_limit} bytes for {url}"
                                     )
                             except (ValueError, TypeError) as exc:
                                 # Re-raise our own ValueError; ignore non-integer header
@@ -111,18 +137,33 @@ class DocumentFetcher:
                         await _validate_url(final_url)
                         _check_content_type(content_type, final_url)
 
-                        # Stream body with hard cutoff at _MAX_BODY_BYTES
+                        is_binary = _is_binary_content_type(content_type)
+                        size_limit = _MAX_PDF_BYTES if is_binary else _MAX_BODY_BYTES
+
+                        # Stream body with hard cutoff at size_limit
                         chunks: list[bytes] = []
                         total = 0
                         async for chunk in response.aiter_bytes(chunk_size=65536):
                             total += len(chunk)
-                            if total > _MAX_BODY_BYTES:
+                            if total > size_limit:
                                 raise ValueError(
-                                    f"Response body exceeds {_MAX_BODY_BYTES} bytes for {final_url}"
+                                    f"Response body exceeds {size_limit} bytes for {final_url}"
                                 )
                             chunks.append(chunk)
 
                         raw_bytes = b"".join(chunks)
+
+                        if is_binary:
+                            return RetrievedDocument(
+                                url=result.url,
+                                final_url=final_url,
+                                title=result.title,
+                                content_type=content_type,
+                                body="",
+                                body_bytes=raw_bytes,
+                                provider=result.provider.value,
+                            )
+
                         encoding = response.encoding or "utf-8"
                         try:
                             body = raw_bytes.decode(encoding, errors="replace")

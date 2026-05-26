@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
+
+if TYPE_CHECKING:
+    from evidence_enrichment.core.extraction.models import ExtractionResult
 
 from evidence_enrichment.core.models.enums import (
     DocumentType,
@@ -33,12 +36,32 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class SectionNode(BaseModel):
+    """A node in the document section tree produced by structured parsers."""
+
+    section_id: str                                      # stable hash of (doc_url + "|".join(path))
+    level: int                                           # 0 = doc root, 1 = H1/Part, 2 = H2 …
+    heading: str = ""                                    # "" for implicit root
+    path: list[str] = Field(default_factory=list)        # ["Financial Review", "Revenue by Geography"]
+    page_start: int | None = None
+    page_end: int | None = None
+    parent_id: str | None = None
+    children_ids: list[str] = Field(default_factory=list)
+    block_ids: list[str] = Field(default_factory=list)   # IDs of leaf ContentBlocks
+
+
 class ContentBlock(BaseModel):
     """A structural block extracted from a parsed document."""
 
-    block_type: Literal["text", "table", "heading"]
+    block_type: Literal["text", "table", "heading", "figure_caption", "list", "kpi"]
     content: str
     char_count: int = 0
+    # New fields — all defaulted so existing construction sites are unaffected
+    block_id: str = ""             # stable hash; "" for legacy blocks
+    section_id: str = ""
+    page: int | None = None
+    bbox: tuple[float, float, float, float] | None = None  # PDF visual grounding (x0,y0,x1,y1)
+    table_data: list[list[str]] | None = None              # raw rows for table blocks
 
     def model_post_init(self, __context: Any) -> None:
         if not self.char_count:
@@ -71,6 +94,7 @@ class RetrievedDocument(BaseModel):
     title: str
     content_type: str
     body: str
+    body_bytes: bytes | None = None  # populated for binary content types (e.g. PDF)
     provider: str
     fetch_success: bool = True
     error: str | None = None
@@ -93,6 +117,10 @@ class ParsedDocument(BaseModel):
     content_hash: str = ""
     blocks: list[ContentBlock] = Field(default_factory=list)
     mime_type: str = ""
+    # New hierarchical fields — all defaulted so existing construction sites are unaffected
+    sections: list[SectionNode] = Field(default_factory=list)
+    section_tree_root: str | None = None
+    page_count: int = 0
 
     @field_validator(
         "entity_match_score", "source_authority_score", "freshness_score", mode="after"
@@ -228,3 +256,14 @@ class PipelineRunResult(BaseModel):
     guardrails_report: GuardrailsReport | None = None
     finops_summary: dict[str, Any] | None = None
     execution_policy_report: dict[str, Any] | None = None
+    # Stage C — parallel typed extraction artifact (schema_validation=True path only)
+    extraction_results: list[ExtractionResult] = Field(default_factory=list)  # NEW
+
+
+# ── Forward-reference resolution ─────────────────────────────────────────────
+# ExtractionResult lives in a separate module.  Pydantic v2 requires an explicit
+# model_rebuild() after the referenced type is importable to finalise the schema.
+# schema_validation=False by default so this import is always safe (no extra deps).
+from evidence_enrichment.core.extraction.models import ExtractionResult  # noqa: E402
+
+PipelineRunResult.model_rebuild()

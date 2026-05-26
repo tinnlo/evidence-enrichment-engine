@@ -9,9 +9,11 @@
 | Replay-first contract | The default demo path is deterministic, zero-network, and regression-friendly. |
 | Context pack as runtime data | Stage-scoped instructions live in files, resolve into `resolved_context.json`, and stay inspectable after every run. |
 | Explicit evidence pipeline | Query planning, search, fetch, parse, assessment, analysis, synthesis, and review are separate stages with local traces. |
+| Hierarchical retrieval | Documents are chunked into a section tree; two-stage retrieval routes first to the right section (~50 comparisons) then to content within it (~30 comparisons), replacing a flat 1,500-chunk scan. |
+| Schema-driven typed extraction | `ExtractionResult` sits alongside the existing `FactClaim` pipeline. A `SchemaExtractor` produces Pydantic-validated typed artifacts (row sums, currency checks, provenance enforcement) with an LLM repair loop and `SchemaValidationGate`. |
 | Optional LangGraph retrieval path | Retrieval can stay off, run as local RAG, or run as a stateful retrieve-evaluate-refine loop without changing the base artifact contract. |
 | Langfuse-first observability | `OBSERVABILITY_BACKEND` routes traces to Langfuse, LangSmith, both, or neither while local artifacts remain on by default. Redaction and summarizer helpers live in vendor-agnostic core modules (`redaction.py`, `summarizers.py`) so neither adapter owns shared privacy logic. |
-| AI FinOps for agentic workflows | Per-stage cost estimation, budget-aware execution, and quality/latency/cost tradeoff reporting — all deterministic and replay-friendly. |
+| AI FinOps for agentic workflows | Per-stage cost estimation, budget-aware execution, and quality/latency/cost tradeoff reporting — all deterministic and replay-friendly. Repair loops are accounted for without double-counting: token totals are pre-summed per call before being passed to the cost estimator. |
 | Execution policy layer | `off\|audit\|enforce` mode governs which live-capability surfaces are permitted. Policy decisions are recorded in `execution_policy.json` separately from FinOps artifacts. |
 | MCP surface | MCP-compatible clients can invoke the replay-safe workflow without inventing a second integration layer. |
 
@@ -302,7 +304,49 @@ The retrieval layer is optional and deliberately scoped. It exists to show a sta
 - The `retrieval_query` span includes a `retrieval_score_breakdown` field listing per-chunk vector, keyword, table-boost, and fused scores — inspectable in `spans.jsonl`.
 - Retrieval is document-scoped, so each `FactClaim.source_url` stays attributable to the document that produced it.
 
-See [docs/retrieval.md](docs/retrieval.md) for chunking, scoring, config, and the LangGraph loop.
+### Retrieval mode
+
+| `retrieval.mode` | Behavior |
+|---|---|
+| `off` | Default path. `analysis` uses the parsed document text directly. |
+| `local` | Accepted documents are chunked, embedded into Chroma, and queried before `analysis`. |
+| `agent` | Wraps retrieval in a LangGraph stateful loop that can retrieve, evaluate, and refine before returning chunks to `analysis`. |
+
+Replay mode skips retrieval entirely even if retrieval is configured, preserving the zero-network default demo path.
+
+### Chunker and retriever
+
+| `retrieval.chunker` | `retrieval.retriever` | Behavior |
+|---|---|---|
+| `flat` (default) | `hybrid` (default) | `TableAwareChunker` + `HybridRetriever` — existing single-stage vector+keyword+table scan. |
+| `hierarchical` | `hierarchical` | `HierarchicalChunker` builds a section tree; `HierarchicalRetriever` routes Stage 1 to ~50 section-summary chunks, then Stage 2 to content within matched sections (~30 comparisons). Falls back to full-document scan for documents indexed before hierarchical chunking. |
+
+Setting `retriever="hierarchical"` with `chunker="flat"` automatically promotes `chunker` to `"hierarchical"` with a warning, since the section-summary chunks required by Stage 1 are only produced by `HierarchicalChunker`.
+
+See [docs/retrieval.md](docs/retrieval.md) and [docs/hierarchical_retrieval_upgrade.md](docs/hierarchical_retrieval_upgrade.md) for chunking, scoring, config, and the LangGraph loop.
+
+## Schema Extraction
+
+When `schema_validation=True` in `RetrievalConfig`, a parallel typed extraction path runs *in addition to* the existing `FactClaim` pipeline — it does not replace synthesis or the review gate.
+
+Key design points:
+
+- **`ExtractionResult`** is a Pydantic model wrapping a typed schema instance (e.g. `GeographicRevenueExtraction`). It round-trips through `model_dump` / `model_validate` via an embedded `__schema_cls__` tag.
+- **`SchemaExtractor`** sends a retrieval-grounded prompt to the configured provider, validates the JSON response against the registered schema, and retries up to `schema_repair_max_attempts` times using `SchemaRepairHelper` on `ValidationError`.
+- **`SchemaValidationGate`** classifies errors as hard fails (row-sum divergence, missing provenance) or soft fails (percentage-sum off, unit mismatch) and applies a confidence penalty to soft fails.
+- **Partial-payload typing**: on the failure path, `_coerce_nested_fields` coerces both list fields (`list[SomeModel]`) and scalar `BaseModel | None` fields to typed instances via `model_construct`, so downstream code does not receive raw dicts for structurally valid sub-objects.
+- **FinOps repair-loop accuracy**: each provider call's token count is estimated individually and pre-summed before being passed to the cost estimator — avoiding the N× overcount that would occur if concatenated text were passed with `call_count=N`.
+
+Registered schemas: `geographic_revenue`, `segment_revenue`, `scope_1_emissions`, `scope_2_emissions`, `headcount_by_region`.
+
+```yaml
+# evidence_enrichment.yaml
+retrieval:
+  schema_validation: true
+  schema_repair_max_attempts: 2
+```
+
+See [docs/hierarchical_retrieval_upgrade.md](docs/hierarchical_retrieval_upgrade.md) for the full design and implementation notes.
 
 ## MCP Server
 

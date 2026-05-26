@@ -12,6 +12,7 @@ replaced by underscores and ``version`` is the schema version integer.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 
@@ -25,6 +26,47 @@ _COLLECTION_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_]{1,510}[a-zA-Z0-9]$")
 def _sanitize(text: str) -> str:
     """Replace non-alphanumeric chars with underscores."""
     return _SAFE_RE.sub("_", text)
+
+
+def _to_chroma_where(where: dict) -> dict:
+    """Convert a flat multi-key filter dict to Chroma-compatible ``$and`` form.
+
+    Chroma ≥ 0.6 requires exactly one top-level operator in a ``where`` clause.
+    A plain dict like ``{"a": "x", "b": "y"}`` raises
+    ``Expected where to have exactly one operator``.  This helper rewrites it to
+    ``{"$and": [{"a": {"$eq": "x"}}, {"b": {"$eq": "y"}}]}``.
+
+    Single-key dicts and dicts that already start with ``$`` are returned as-is
+    so we don't double-wrap already-valid filters.
+    """
+    if len(where) <= 1:
+        return where
+    first_key = next(iter(where))
+    if first_key.startswith("$"):
+        # Already uses an operator at the top level (e.g. {"$and": [...]})
+        return where
+    return {"$and": [{k: {"$eq": v}} for k, v in where.items()]}
+
+
+def _serialise_table(table_data: list[list[str]] | None) -> str:
+    """Serialise table_data to a compact JSON string suitable for Chroma metadata."""
+    if not table_data:
+        return ""
+    return json.dumps(table_data, ensure_ascii=False, separators=(",", ":"))
+
+
+def _deserialise_table(value: str | None) -> list[list[str]] | None:
+    """Deserialise table_data from the Chroma metadata JSON string."""
+    if not value:
+        return None
+    try:
+        parsed = json.loads(value)
+        # Validate structure: must be list[list[str]]
+        if isinstance(parsed, list) and all(isinstance(row, list) for row in parsed):
+            return parsed
+    except (json.JSONDecodeError, TypeError):
+        logging.warning("Failed to deserialise table_data_json: %r", value)
+    return None
 
 
 def _collection_name(entity_id: str, model: str) -> str:
@@ -119,6 +161,17 @@ class ChromaVectorStore:
                 "index": c.index,
                 "char_count": c.char_count,
                 "content_hash": c.content_hash,
+                # Hierarchical fields — written for new chunks; absent on legacy chunks
+                "section_id": c.section_id,
+                "section_path_str": c.section_path_str,
+                "section_level": c.section_level,
+                "chunk_role": c.chunk_role,
+                "parent_section_id": c.parent_section_id,
+                "token_count": c.token_count,
+                # table_data is a nested list — serialise to JSON string for Chroma
+                # (Chroma only accepts scalar metadata values).  Empty string = absent.
+                **({"table_data_json": _serialise_table(c.table_data)} if c.table_data else {}),
+                **({"page": c.page} if c.page is not None else {}),
             }
             for c in chunks
         ]
@@ -201,7 +254,7 @@ class ChromaVectorStore:
             "include": ["documents", "metadatas", "distances"],
         }
         if where:
-            query_kwargs["where"] = where
+            query_kwargs["where"] = _to_chroma_where(where)
 
         try:
             results = collection.query(**query_kwargs)  # type: ignore[union-attr]
@@ -223,6 +276,9 @@ class ChromaVectorStore:
         ):
             # Convert cosine distance → similarity (Chroma returns L2 or cosine dist)
             vector_score = max(0.0, 1.0 - dist)
+            # page may be absent from legacy chunks — keep None in that case
+            _raw_page = meta.get("page")
+            _page: int | None = int(_raw_page) if _raw_page is not None else None
             chunk = Chunk(
                 chunk_id=chunk_id,
                 document_url=meta.get("document_url", ""),
@@ -231,6 +287,15 @@ class ChromaVectorStore:
                 content=doc,
                 chunk_type=meta.get("chunk_type", "text"),
                 char_count=int(meta.get("char_count", len(doc))),
+                # Hierarchical fields — default gracefully for legacy chunks
+                section_id=meta.get("section_id", ""),
+                section_path_str=meta.get("section_path_str", ""),
+                section_level=int(meta.get("section_level", 0)),
+                parent_section_id=meta.get("parent_section_id", ""),
+                chunk_role=meta.get("chunk_role", "content"),
+                page=_page,
+                token_count=int(meta.get("token_count", 0)),
+                table_data=_deserialise_table(meta.get("table_data_json")),
             )
             hits.append(
                 RetrievalResult(
@@ -241,6 +306,47 @@ class ChromaVectorStore:
             )
 
         return hits
+
+    def get_section_metadata_for_document(
+        self,
+        entity_id: str,
+        document_url: str,
+    ) -> list[dict]:
+        """Return lightweight section metadata for every chunk of *document_url*.
+
+        Each returned dict contains ``section_id``, ``section_path_str``, and
+        ``parent_section_id``.  Callers use this to reconstruct
+        ``_descendant_map`` without fetching full chunk content or embeddings
+        (a single metadata-only ``collection.get`` is issued).
+
+        Returns an empty list when the collection does not yet exist or the
+        document has no indexed chunks.
+        """
+        collection = self._get_collection(entity_id)
+        try:
+            result = collection.get(  # type: ignore[union-attr]
+                where={"document_url": {"$eq": document_url}},
+                include=["metadatas"],
+            )
+        except Exception as exc:
+            logging.warning(
+                "get_section_metadata_for_document failed for %s (entity=%s): %s",
+                document_url,
+                entity_id,
+                exc,
+            )
+            return []
+
+        metas = result.get("metadatas") or []
+        out: list[dict] = []
+        for m in metas:
+            sid = m.get("section_id", "")
+            path = m.get("section_path_str", "")
+            parent = m.get("parent_section_id", "")
+            if sid:
+                out.append({"section_id": sid, "section_path_str": path,
+                             "parent_section_id": parent})
+        return out
 
     # ------------------------------------------------------------------
     # Collection management

@@ -85,7 +85,17 @@ def _build_analysis_context(
         parts = []
         chunk_ids = []
         for i, result in enumerate(retrieved_chunks, start=1):
-            chunk_label = f"[Chunk {i} | type={result.chunk.chunk_type} | score={result.score:.3f}]"
+            section_parts = (
+                result.chunk.section_path_str.split("|")
+                if result.chunk.section_path_str
+                else []
+            )
+            section = " > ".join(section_parts) or "—"
+            page = f"p.{result.chunk.page}" if result.chunk.page else "—"
+            chunk_label = (
+                f"[Chunk {i} | role={result.chunk.chunk_role} | "
+                f"section={section} | page={page} | score={result.score:.3f}]"
+            )
             parts.append(f"{chunk_label}\n{result.chunk.content}")
             chunk_ids.append(result.chunk.chunk_id)
         context_text = "\n\n".join(parts)

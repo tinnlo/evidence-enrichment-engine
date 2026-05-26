@@ -101,7 +101,7 @@ class TestBuildAnalysisContext:
         result = _make_retrieval_result(chunk, score=0.75)
         context, _ = _build_analysis_context(doc, [result])
         assert "[Chunk 1" in context
-        assert "type=text" in context
+        assert "role=content" in context   # new label format: role= replaces type=
         assert "0.750" in context
 
 

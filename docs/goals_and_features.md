@@ -128,6 +128,8 @@ See [retrieval.md](retrieval.md) for chunking, scoring, config, and the LangGrap
 | `tests/test_mcp_server.py` | MCP tools, resources, and transport-safe defaults |
 | `tests/test_execution_policy.py` | Policy models, engine (all three modes), config surface, `execution_policy.json` artifact, coordinator smoke paths, and remote-tracing policy gate |
 | `tests/test_agents.py` | Live agent LLM usage capture (provider-reported and estimated fallback) |
+| `tests/test_hierarchical.py` | Hierarchical chunker, two-stage `HierarchicalRetriever`, Chroma metadata serialisation, section-pruning, legacy-collection fallback, and coordinator wiring (42 tests) |
+| `tests/test_extraction.py` | Stage C schema extraction: typed schemas, `ExtractionResult` round-trip, `SchemaExtractor` repair loop, `SchemaValidationGate`, budget gating, FinOps repair-loop token accounting, and nested-model coercion on failure path (45 tests) |
 | `tests/` | Full local regression suite exercised by CI |
 | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) | Installs `.[dev]`, runs `pytest tests/`, then `ruff check .` |
 

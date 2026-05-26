@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -17,6 +18,17 @@ class Chunk(BaseModel):
     content: str
     chunk_type: str = "text"  # "text" | "table"
     char_count: int = 0
+    # Hierarchical fields — all defaulted for backward compatibility with
+    # existing chunks that were indexed before this upgrade.
+    section_id: str = ""
+    section_path_str: str = ""    # pipe-joined scalar: "Financial Review|Revenue by Geography"
+                                  # Derive list form: section_path_str.split("|") if section_path_str else []
+    section_level: int = 0
+    parent_section_id: str = ""   # direct parent's section_id; "" for root-owned chunks
+    page: int | None = None
+    chunk_role: Literal["section_summary", "content", "table", "navigation"] = "content"
+    token_count: int = 0
+    table_data: list[list[str]] | None = None
 
     def model_post_init(self, __context: object) -> None:
         if not self.char_count:

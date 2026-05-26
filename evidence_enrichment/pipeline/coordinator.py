@@ -46,6 +46,7 @@ from evidence_enrichment.finops.collector import FinOpsCollector
 from evidence_enrichment.finops.estimation import (
     estimate_embedding_cost,
     estimate_stage_cost,
+    estimate_tokens,
     stage_cost_from_tokens,
 )
 from evidence_enrichment.finops.models import (
@@ -58,7 +59,8 @@ from evidence_enrichment.finops.models import (
 from evidence_enrichment.finops.policy import BudgetPolicyEngine
 from evidence_enrichment.finops.pricing import build_catalog
 from evidence_enrichment.guardrails import run_guardrails
-from evidence_enrichment.core.parse.parser import TextParser
+from evidence_enrichment.core.parse.base import ParserRegistry
+from evidence_enrichment.core.parse.html_structured import HTMLStructuredParser
 from evidence_enrichment.core.providers.agents import (
     AnthropicAnalysisAgent,
     AnthropicSynthesisAgent,
@@ -71,6 +73,7 @@ from evidence_enrichment.core.providers.search import (
     TavilySearchProvider,
 )
 from evidence_enrichment.core.quality.gates import (
+    SchemaValidationGate,
     compute_overall_confidence,
     gate_result,
 )
@@ -101,6 +104,24 @@ if TYPE_CHECKING:
     from evidence_enrichment.core.retrieval.models import RetrievalResult
     from evidence_enrichment.core.retrieval.retriever import HybridRetriever
     from evidence_enrichment.core.retrieval.agent import RetrievalAgent
+    from evidence_enrichment.core.extraction.models import ExtractionResult
+
+
+class _NullSpan:
+    """No-op context manager used when no tracer is available.
+
+    ``_run_schema_extraction`` wraps its API call in a tracer span when a
+    ``LocalTracer`` is passed.  When called without one (e.g. in unit tests or
+    future non-pipeline callers), this sentinel span is used instead so the
+    span context-manager protocol is always satisfied without an ``if tracer``
+    guard inside the hot path.
+    """
+
+    def __enter__(self) -> dict:
+        return {}
+
+    def __exit__(self, *_: object) -> None:
+        return None
 
 
 @dataclass
@@ -146,7 +167,13 @@ class EvidenceCoordinator:
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or get_settings()
         self.fetcher = DocumentFetcher()
-        self.parser = TextParser()
+        self.parser = ParserRegistry()
+        self.parser.register(HTMLStructuredParser())  # text/html — structured section tree
+        try:
+            from evidence_enrichment.core.parse.pdf_structured import PDFStructuredParser
+            self.parser.register(PDFStructuredParser())  # application/pdf (.[retrieval] only)
+        except ImportError:
+            pass  # PDF deps absent; PDFs already blocked at fetch time by _ALLOWED_BINARY_PREFIXES
         self.assessor = EvidenceAssessor()
         self.context_resolver = ContextResolver(
             self.settings.context_path / "context_manifest.yaml"
@@ -254,25 +281,48 @@ class EvidenceCoordinator:
                 persist_path=rc.persist_path,
                 embedding_model=rc.embedding_model,
             )
-            chunker = TableAwareChunker(
-                chunk_size=rc.chunk_size,
-                overlap=rc.overlap,
-                max_table_size=rc.max_table_size,
-            )
-            hybrid = HybridRetriever(
-                entity_id=entity_id,
-                store=store,
-                embedder=embedder,
-                chunker=chunker,
-                top_k=rc.top_k,
-                weights=rc.weights,
-            )
+            # Route chunker based on config
+            if rc.chunker == "hierarchical":
+                from evidence_enrichment.core.retrieval.hierarchical_chunker import HierarchicalChunker
+                chunker: object = HierarchicalChunker(
+                    target_chunk_tokens=rc.target_chunk_tokens,
+                    max_chunk_tokens=rc.max_chunk_tokens,
+                    overlap_tokens=rc.overlap_tokens,
+                )
+            else:
+                chunker = TableAwareChunker(
+                    chunk_size=rc.chunk_size,
+                    overlap=rc.overlap,
+                    max_table_size=rc.max_table_size,
+                )
+            # Route retriever based on config
+            if rc.retriever == "hierarchical":
+                from evidence_enrichment.core.retrieval.retriever import HierarchicalRetriever
+                active_retriever: object = HierarchicalRetriever(
+                    entity_id=entity_id,
+                    store=store,
+                    embedder=embedder,
+                    chunker=chunker,
+                    top_k=rc.top_k,
+                    weights=rc.hierarchical_weights,
+                    section_top_k=rc.section_top_k,
+                    section_min_score=rc.section_min_score,
+                )
+            else:
+                active_retriever = HybridRetriever(
+                    entity_id=entity_id,
+                    store=store,
+                    embedder=embedder,
+                    chunker=chunker,
+                    top_k=rc.top_k,
+                    weights=rc.hybrid_weights,
+                )
             if rc.mode == "agent":
                 from evidence_enrichment.core.retrieval.agent import RetrievalAgent
 
-                self._retriever = RetrievalAgent(hybrid)
+                self._retriever = RetrievalAgent(active_retriever)
             else:
-                self._retriever = hybrid
+                self._retriever = active_retriever
         except Exception as exc:
             logging.warning(
                 "Failed to initialise retriever for entity %s: %s", entity_id, exc
@@ -942,7 +992,7 @@ class EvidenceCoordinator:
             return result
         if use_structured:
             result = [
-                self.parser.parse_with_structure(document)
+                self.parser.parse(document)
                 for document in fetched_documents
             ]
         else:
@@ -1421,12 +1471,20 @@ class EvidenceCoordinator:
                     rc_cfg = self.settings.retrieval
                     _gate_chunk_chars: list[int] = []
                     try:
-                        from evidence_enrichment.core.retrieval.chunker import TableAwareChunker as _Chunker
-                        _gate_chunker = _Chunker(
-                            chunk_size=rc_cfg.chunk_size,
-                            overlap=rc_cfg.overlap,
-                            max_table_size=rc_cfg.max_table_size,
-                        )
+                        if rc_cfg.chunker == "hierarchical":
+                            from evidence_enrichment.core.retrieval.hierarchical_chunker import HierarchicalChunker as _Chunker  # type: ignore[assignment]
+                            _gate_chunker = _Chunker(
+                                target_chunk_tokens=rc_cfg.target_chunk_tokens,
+                                max_chunk_tokens=rc_cfg.max_chunk_tokens,
+                                overlap_tokens=rc_cfg.overlap_tokens,
+                            )
+                        else:
+                            from evidence_enrichment.core.retrieval.chunker import TableAwareChunker as _FlatChunker
+                            _gate_chunker = _FlatChunker(
+                                chunk_size=rc_cfg.chunk_size,
+                                overlap=rc_cfg.overlap,
+                                max_table_size=rc_cfg.max_table_size,
+                            )
                         for d in accepted_for_indexing:
                             for c in _gate_chunker.chunk(d):
                                 _gate_chunk_chars.append(len(c.content))
@@ -1759,6 +1817,46 @@ class EvidenceCoordinator:
         )
         result.retrieval_chunk_count = retrieval_chunk_count
         result.retrieval_top_scores = top_scores
+
+        # Stage C — typed schema extraction (additive; only when opted in)
+        if self.settings.retrieval.schema_validation:
+            extraction_results = await self._run_schema_extraction(
+                field_name=enricher.field_name,
+                retrieved_chunks_map=retrieved_chunks_map,
+                assessed_documents=assessed_documents,
+                tracer=tracer,
+            )
+            gate = SchemaValidationGate()
+            gated: list = []
+            for er in extraction_results:
+                gate_result_sc = gate.check(er)
+                if gate_result_sc.hard_errors:
+                    logging.warning(
+                        "Schema extraction hard-fail for field %r: %s",
+                        er.field_name,
+                        gate_result_sc.hard_errors,
+                    )
+                # Apply gate's confidence penalty: update both the wrapper field
+                # and the inner value.extraction_confidence so the two never diverge.
+                new_confidence = gate_result_sc.confidence_after
+                new_value = er.value
+                if hasattr(er.value, "extraction_confidence"):
+                    try:
+                        new_value = er.value.model_copy(
+                            update={"extraction_confidence": new_confidence}
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass  # leave stale on unexpected copy failure
+                gated.append(
+                    er.model_copy(
+                        update={
+                            "extraction_confidence": new_confidence,
+                            "value": new_value,
+                        }
+                    )
+                )
+            result.extraction_results = gated
+
         return result
 
     async def _run_with_replay(
@@ -2102,6 +2200,133 @@ class EvidenceCoordinator:
                 raise RuntimeError("Anthropic API key not configured.")
             return AnthropicSynthesisAgent(self.settings.anthropic_api_key, model)
         raise RuntimeError(f"Unknown synthesis provider: {provider}")
+
+    async def _run_schema_extraction(
+        self,
+        field_name: str,
+        retrieved_chunks_map: "dict[str, list[RetrievalResult]]",
+        assessed_documents: "list[ParsedDocument]",
+        tracer: "LocalTracer | None" = None,
+    ) -> "list[ExtractionResult]":
+        """Run typed extraction for ``field_name`` when ``schema_validation=True``.
+
+        Builds chunk context from retrieved chunks (falling back to plain
+        document text when no retrieval was performed), then delegates to
+        ``SchemaExtractor``.
+
+        Model selection goes through ``_resolve_stage_model_and_budget`` so
+        cheap-model downgrades and budget blocks apply identically to the main
+        analysis stage.  Token spend is recorded via ``_record_stage_finops``
+        (char-based estimation) so FinOps accounting remains complete.
+
+        Returns an empty list when:
+        - the field has no registered schema, or
+        - no analysis provider is available, or
+        - the budget is blocked for this stage, or
+        - the extractor raises unexpectedly.
+        """
+        from evidence_enrichment.core.extraction.extractor import SchemaExtractor
+        from evidence_enrichment.core.extraction.schemas import SCHEMA_REGISTRY
+
+        if field_name not in SCHEMA_REGISTRY:
+            return []
+
+        # ── Model / budget resolution ────────────────────────────────────────
+        analysis_agent = self._analysis_agent()
+        provider = analysis_agent.provider_type.value
+        schema_model, _skip_retrieval, schema_budget, schema_downgrade = (
+            self._resolve_stage_model_and_budget(
+                "schema_extraction",
+                provider,
+                list(assessed_documents),
+            )
+        )
+        if schema_budget.status.value == "blocked":
+            logging.warning(
+                "_run_schema_extraction blocked by budget for field %r", field_name
+            )
+            return []
+
+        # ── Build (chunk_id, text) context ───────────────────────────────────
+        chunk_context: list[tuple[str, str]] = []
+        if retrieved_chunks_map:
+            for hits in retrieved_chunks_map.values():
+                for r in hits:
+                    chunk_context.append((r.chunk.chunk_id, r.chunk.content))
+        else:
+            for doc in assessed_documents:
+                if doc.accepted_for_analysis:
+                    text = (doc.full_text or doc.text)[:6000]
+                    chunk_context.append((doc.url, text))
+
+        # ── Build provider callable using budget-resolved model ──────────────
+        # Accumulate per-call token counts so the FinOps finally block can
+        # report pre-summed totals via _record_stage_finops_from_tokens.
+        # Using pre-summed counts avoids the double-scaling that occurs when
+        # concatenated text is passed to _record_stage_finops, which treats
+        # its input_text as a single call's text and then multiplies by
+        # call_count (see estimate_stage_cost docstring).
+        _input_tokens_total: list[int] = []
+        _output_tokens_total: list[int] = []
+
+        async def _provider_fn(prompt: str) -> str:
+            _input_tokens_total.append(estimate_tokens(prompt))
+            if provider == "openai":
+                from openai import AsyncOpenAI  # noqa: PLC0415
+                client = AsyncOpenAI(api_key=self.settings.openai_api_key)
+                response = await client.responses.create(
+                    model=schema_model, input=prompt
+                )
+                text = response.output_text
+            elif provider == "anthropic":
+                import anthropic  # noqa: PLC0415
+                client = anthropic.AsyncAnthropic(api_key=self.settings.anthropic_api_key)
+                message = await client.messages.create(
+                    model=schema_model,
+                    max_tokens=2048,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                text = message.content[0].text
+            else:
+                raise RuntimeError(
+                    f"Unsupported provider for schema extraction: {provider}"
+                )
+            _output_tokens_total.append(estimate_tokens(text))
+            return text
+
+        rc = self.settings.retrieval
+        extractor = SchemaExtractor(
+            provider_fn=_provider_fn,
+            max_repair_attempts=rc.schema_repair_max_attempts,
+        )
+
+        span_ctx = tracer.span("schema_extraction", provider=provider, input_count=len(chunk_context)) if tracer is not None else _NullSpan()
+        with span_ctx as span:
+            try:
+                result = await extractor.extract(field_name, chunk_context)
+            except Exception as exc:  # noqa: BLE001
+                logging.warning(
+                    "_run_schema_extraction failed for field %r: %s", field_name, exc
+                )
+                return []
+            finally:
+                # Record FinOps using pre-summed per-call token counts so that
+                # repair loops are not double-counted.  _record_stage_finops
+                # would multiply token counts by call_count; using
+                # _record_stage_finops_from_tokens with already-summed totals
+                # avoids that double-scaling.
+                if self.settings.finops.enabled and _input_tokens_total:
+                    self._record_stage_finops_from_tokens(
+                        span,
+                        stage="schema_extraction",
+                        provider=provider,
+                        model_name=schema_model,
+                        total_input_tokens=sum(_input_tokens_total),
+                        total_output_tokens=sum(_output_tokens_total),
+                        call_count=len(_input_tokens_total),
+                        downgrade_applied=schema_downgrade,
+                    )
+        return [result] if result is not None else []
 
     def _build_result(
         self,
