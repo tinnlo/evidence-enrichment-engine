@@ -219,6 +219,13 @@ class TestHTMLStructuredParserWiring:
 # F2: PDFStructuredParser heading-fallback wiring (no pdfplumber needed)
 # ---------------------------------------------------------------------------
 
+_PDF_SKIP = pytest.mark.skipif(
+    __import__("importlib").util.find_spec("fitz") is None,
+    reason="pymupdf not installed (optional dep)",
+)
+
+
+@_PDF_SKIP
 class TestPDFHeadingFallbackWiring:
     """Test _build_sections_from_headings directly (no PDF bytes required)."""
 
@@ -251,6 +258,7 @@ class TestPDFHeadingFallbackWiring:
         assert "b4" in risk.block_ids
 
 
+@_PDF_SKIP
 class TestPDFTOCWiring:
     def test_toc_children_ids_wired(self):
         from evidence_enrichment.core.parse.pdf_structured import _build_sections_from_toc
@@ -447,6 +455,7 @@ class TestRepeatedHeadingIds:
         assert len(overview_summaries) == 2, \
             f"expected 2 section_summary chunks for Overview, got {len(overview_summaries)}"
 
+    @_PDF_SKIP
     def test_pdf_heading_fallback_ids_distinct(self):
         from evidence_enrichment.core.parse.pdf_structured import _build_sections_from_headings
         blocks = [
@@ -461,6 +470,7 @@ class TestRepeatedHeadingIds:
         overviews = [s for s in sections if s.heading == "Overview"]
         assert len(overviews) == 2
 
+    @_PDF_SKIP
     def test_pdf_toc_ids_distinct(self):
         from evidence_enrichment.core.parse.pdf_structured import _build_sections_from_toc
         toc = [(1, "Overview", 1), (1, "Revenue", 5), (1, "Overview", 10)]

@@ -454,7 +454,7 @@ class TestActivateRemoteTracingWithPolicyCheck:
         enricher = HeadquartersCountryEnricher()
         entity = {"entity_id": "microsoft", "name": "Microsoft Corporation"}
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             coordinator.run(entity, enricher, mode="replay")
         )
         assert result is not None
