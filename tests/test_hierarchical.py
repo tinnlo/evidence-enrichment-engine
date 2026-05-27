@@ -212,7 +212,7 @@ class TestHTMLStructuredParserWiring:
         chunks = HierarchicalChunker().chunk(parsed)
         content_chunks = [c for c in chunks if c.chunk_role == "content"]
         for c in content_chunks:
-            assert c.section_path_str, f"content chunk missing section_path_str"
+            assert c.section_path_str, "content chunk missing section_path_str"
 
 
 # ---------------------------------------------------------------------------
@@ -369,8 +369,12 @@ class TestSelectSections:
     def test_always_includes_top1_even_below_threshold(self):
         r = self._make_retriever()
         from unittest.mock import MagicMock
-        h1 = MagicMock(); h1.vector_score = 0.1; h1.chunk.section_id = "s_low"
-        h2 = MagicMock(); h2.vector_score = 0.9; h2.chunk.section_id = "s_high"
+        h1 = MagicMock()
+        h1.vector_score = 0.1
+        h1.chunk.section_id = "s_low"
+        h2 = MagicMock()
+        h2.vector_score = 0.9
+        h2.chunk.section_id = "s_high"
         # h1 is top-1 (first in list), below min_score=0.5
         selected = r._select_sections([h1, h2])
         assert "s_low" in selected, "top-1 must be included regardless of min_score"
@@ -378,8 +382,12 @@ class TestSelectSections:
     def test_high_score_hits_included(self):
         r = self._make_retriever()
         from unittest.mock import MagicMock
-        h1 = MagicMock(); h1.vector_score = 0.9; h1.chunk.section_id = "s1"
-        h2 = MagicMock(); h2.vector_score = 0.8; h2.chunk.section_id = "s2"
+        h1 = MagicMock()
+        h1.vector_score = 0.9
+        h1.chunk.section_id = "s1"
+        h2 = MagicMock()
+        h2.vector_score = 0.8
+        h2.chunk.section_id = "s2"
         selected = r._select_sections([h1, h2])
         assert "s1" in selected
         assert "s2" in selected
@@ -387,8 +395,12 @@ class TestSelectSections:
     def test_below_threshold_hits_excluded_except_top1(self):
         r = self._make_retriever()
         from unittest.mock import MagicMock
-        h1 = MagicMock(); h1.vector_score = 0.9; h1.chunk.section_id = "s1"
-        h2 = MagicMock(); h2.vector_score = 0.1; h2.chunk.section_id = "s2"
+        h1 = MagicMock()
+        h1.vector_score = 0.9
+        h1.chunk.section_id = "s1"
+        h2 = MagicMock()
+        h2.vector_score = 0.1
+        h2.chunk.section_id = "s2"
         selected = r._select_sections([h1, h2])
         assert "s1" in selected
         assert "s2" not in selected
@@ -400,7 +412,9 @@ class TestSelectSections:
     def test_empty_section_id_filtered_out(self):
         r = self._make_retriever()
         from unittest.mock import MagicMock
-        h1 = MagicMock(); h1.vector_score = 0.9; h1.chunk.section_id = ""
+        h1 = MagicMock()
+        h1.vector_score = 0.9
+        h1.chunk.section_id = ""
         selected = r._select_sections([h1])
         assert selected == [], f"empty section_id should be filtered: {selected}"
 
@@ -613,7 +627,6 @@ class TestTokenCountTableDataRoundTrip:
         with tempfile.TemporaryDirectory() as tmp:
             store = ChromaVectorStore(persist_path=tmp, embedding_model="text-embedding-3-small")
             # Manually insert a chunk with no token_count key in metadata
-            import chromadb
             col = store._get_collection("e")
             col.upsert(
                 ids=["legacy1"],

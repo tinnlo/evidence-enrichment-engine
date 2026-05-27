@@ -41,7 +41,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,6 +49,10 @@ logging.basicConfig(
     stream=sys.stderr,
 )
 log = logging.getLogger("migrate_to_hierarchical")
+
+if TYPE_CHECKING:
+    from evidence_enrichment.core.parse.models import ParsedDocument
+    from evidence_enrichment.core.retrieval.retriever import HierarchicalRetriever
 
 
 # ---------------------------------------------------------------------------

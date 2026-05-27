@@ -43,6 +43,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from evidence_enrichment.core.extraction.models import ExtractionResult
+
 
 def _check_deps() -> None:
     try:
@@ -508,7 +510,7 @@ def main(argv: list[str] | None = None) -> int:
     criteria = report["acceptance_criteria"]
 
     if not args.quiet:
-        print(f"\nStage D Acceptance Harness")
+        print("\nStage D Acceptance Harness")
         print(f"{'─' * 50}")
         for result in report["results"]:
             status = "PASS" if result["pass"] else "FAIL"
@@ -517,7 +519,7 @@ def main(argv: list[str] | None = None) -> int:
                 for reason in result["failure_reasons"]:
                     print(f"         {reason}")
 
-        print(f"\nAcceptance criteria:")
+        print("\nAcceptance criteria:")
         for name, c in criteria.items():
             status = "PASS" if c["passed"] else "FAIL"
             print(f"  [{status}] {name}: {c['actual']}")

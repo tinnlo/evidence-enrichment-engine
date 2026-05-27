@@ -57,7 +57,7 @@ from evidence_enrichment.core.extraction.schemas import (
     SCHEMA_REGISTRY,
 )
 from evidence_enrichment.core.extraction.extractor import SchemaExtractor
-from evidence_enrichment.core.quality.gates import SchemaGateResult, SchemaValidationGate
+from evidence_enrichment.core.quality.gates import SchemaValidationGate
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -1153,7 +1153,7 @@ def test_g3_schema_extraction_uses_resolved_model_not_settings_model():
     """
     import asyncio
     import json
-    from unittest.mock import AsyncMock, MagicMock, patch
+    from unittest.mock import MagicMock, patch
 
     from evidence_enrichment.pipeline.coordinator import EvidenceCoordinator
     from evidence_enrichment.finops.models import BudgetDecision, BudgetStatus, DowngradeAction
@@ -1201,7 +1201,7 @@ def test_g3_schema_extraction_uses_resolved_model_not_settings_model():
         instance.responses.create = _fake_create
         mock_cls.return_value = instance
 
-        result = asyncio.run(
+        asyncio.run(
             coord._run_schema_extraction(
                 field_name="geographic_revenue",
                 retrieved_chunks_map={},
@@ -1230,7 +1230,6 @@ def test_g4_finops_records_all_repair_calls_not_just_last():
     """
     import asyncio
     import json
-    import math
     from unittest.mock import MagicMock, patch
 
     from evidence_enrichment.pipeline.coordinator import EvidenceCoordinator

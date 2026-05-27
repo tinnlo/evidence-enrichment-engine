@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING
 
 from evidence_enrichment.core.models.contracts import FactClaim, SynthesisResult
 from evidence_enrichment.core.models.enums import ReviewDecision
+
+if TYPE_CHECKING:
+    from evidence_enrichment.core.extraction.models import ExtractionResult
 
 
 def compute_overall_confidence(claims: list[FactClaim], synthesis: SynthesisResult) -> float:
@@ -133,7 +136,6 @@ class SchemaValidationGate:
             ``confidence_penalty`` for each detected soft-fail error, clamped
             to ``[0.0, 1.0]``.
         """
-        from evidence_enrichment.core.extraction.models import ExtractionResult  # noqa: PLC0415
 
         gate = SchemaGateResult(confidence_after=result.extraction_confidence)
 
