@@ -124,13 +124,17 @@ See [retrieval.md](retrieval.md) for chunking, scoring, config, and the LangGrap
 |---|---|
 | `tests/test_observability.py` | Backend routing, privacy defaults, runtime overrides, credential eviction, and tombstone behavior |
 | `tests/test_pipeline.py` | End-to-end pipeline behavior and artifact generation |
-| `tests/test_retrieval_agent.py` | Retrieval-agent orchestration and replay boundaries |
+| `tests/test_retrieval_agent.py` | Retrieval-agent orchestration, replay boundaries, and Stage D parity: 8 parametrized tests confirm `RetrievalAgent` behaves identically with `HybridRetriever` and `HierarchicalRetriever` stub interfaces |
 | `tests/test_mcp_server.py` | MCP tools, resources, and transport-safe defaults |
 | `tests/test_execution_policy.py` | Policy models, engine (all three modes), config surface, `execution_policy.json` artifact, coordinator smoke paths, and remote-tracing policy gate |
 | `tests/test_agents.py` | Live agent LLM usage capture (provider-reported and estimated fallback) |
-| `tests/test_hierarchical.py` | Hierarchical chunker, two-stage `HierarchicalRetriever`, Chroma metadata serialisation, section-pruning, legacy-collection fallback, and coordinator wiring (42 tests) |
+| `tests/test_hierarchical.py` | Hierarchical chunker, two-stage `HierarchicalRetriever`, Chroma metadata serialisation, section-pruning, legacy-collection fallback, coordinator wiring, and Stage E end-to-end fixture path (46 tests) |
 | `tests/test_extraction.py` | Stage C schema extraction: typed schemas, `ExtractionResult` round-trip, `SchemaExtractor` repair loop, `SchemaValidationGate`, budget gating, FinOps repair-loop token accounting, and nested-model coercion on failure path (45 tests) |
-| `tests/` | Full local regression suite exercised by CI |
+| `evals/cases.yaml` | 7 replay eval cases including `section_routing_html` (replay-only regression for `hq_country`; does not exercise hierarchical retriever — replay mode hardcodes `use_structured=False`) |
+| `evals/run_acceptance.py` | Stage D acceptance harness: 5 schema-extraction fixture cases; reports `schema_valid_rate`, `gate_confidence_mean`, hard-fail gate enforcement |
+| `scripts/migrate_to_hierarchical.py` | Migration script: re-parses v1 Chroma chunks via `GenericTextParser` and re-indexes via `HierarchicalChunker` into a `_v2` collection |
+| `tests/test_hierarchical.py::TestEndToEndHierarchicalRetrieval` | Stage E (3 tests): fixture-based end-to-end proof that `HierarchicalChunker` + `HierarchicalRetriever` surface section-aware chunks with non-empty `section_id`, `section_path_str`, and `hits[0]` from the correct section |
+| `tests/` | Full local regression suite exercised by CI (456 passed, 7 skipped) |
 | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) | Installs `.[dev]`, runs `pytest tests/`, then `ruff check .` |
 
 ## What This Repo Does Not Try To Be

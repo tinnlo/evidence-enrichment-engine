@@ -82,12 +82,12 @@ def test_eval_cli_creates_report(tmp_path: Path) -> None:
     assert output.exists()
     payload = output.read_text(encoding="utf-8")
     assert '"summary"' in payload
-    assert '"total_cases": 6' in payload
+    assert '"total_cases": 7' in payload
     assert finops_output.exists()
     finops_payload = json.loads(finops_output.read_text(encoding="utf-8"))
     assert "summary" in finops_payload
     assert "cases" in finops_payload
-    assert finops_payload["summary"]["total_cases"] == 6
+    assert finops_payload["summary"]["total_cases"] == 7
 
 
 def _make_accepted_doc(url: str, text: str = "some document text") -> ParsedDocument:

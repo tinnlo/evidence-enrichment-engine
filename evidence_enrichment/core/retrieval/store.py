@@ -20,6 +20,7 @@ from evidence_enrichment.core.retrieval.models import Chunk, RetrievalResult
 
 _SCHEMA_VERSION = 1
 _SAFE_RE = re.compile(r"[^a-zA-Z0-9_]")
+_SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2})
 _COLLECTION_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_]{1,510}[a-zA-Z0-9]$")
 
 
@@ -69,10 +70,15 @@ def _deserialise_table(value: str | None) -> list[list[str]] | None:
     return None
 
 
-def _collection_name(entity_id: str, model: str) -> str:
+def _collection_name(entity_id: str, model: str, schema_version: int = _SCHEMA_VERSION) -> str:
+    if schema_version not in _SUPPORTED_SCHEMA_VERSIONS:
+        raise ValueError(
+            f"Unsupported schema_version {schema_version!r}. "
+            f"Must be one of {sorted(_SUPPORTED_SCHEMA_VERSIONS)}."
+        )
     model_slug = _sanitize(model)
     entity_slug = _sanitize(entity_id)
-    name = f"entity_{entity_slug}__{model_slug}_v{_SCHEMA_VERSION}"
+    name = f"entity_{entity_slug}__{model_slug}_v{schema_version}"
     # Chroma requires collection names 3–512 chars, starting and ending
     # with [a-zA-Z0-9].  Truncate then strip any trailing underscores.
     name = name[:512].rstrip("_")
@@ -90,13 +96,27 @@ class ChromaVectorStore:
         Directory path for Chroma's persistent storage.
     embedding_model:
         Embedding model name (used in collection naming).
+    schema_version:
+        Collection schema version.  ``1`` (default) addresses the legacy flat
+        collection; ``2`` addresses the hierarchical collection produced by the
+        Stage D migration script.  Both versions co-exist in the same Chroma
+        instance so a failed migration never removes the live collection.
     """
 
     def __init__(
-        self, persist_path: str, embedding_model: str = "text-embedding-3-small"
+        self,
+        persist_path: str,
+        embedding_model: str = "text-embedding-3-small",
+        schema_version: int = _SCHEMA_VERSION,
     ) -> None:
+        if schema_version not in _SUPPORTED_SCHEMA_VERSIONS:
+            raise ValueError(
+                f"Unsupported schema_version {schema_version!r}. "
+                f"Must be one of {sorted(_SUPPORTED_SCHEMA_VERSIONS)}."
+            )
         self.persist_path = persist_path
         self.embedding_model = embedding_model
+        self.schema_version = schema_version
         self._client: object | None = None  # lazy
 
     def _get_client(self) -> object:
@@ -113,7 +133,7 @@ class ChromaVectorStore:
 
     def _get_collection(self, entity_id: str) -> object:
         client = self._get_client()
-        name = _collection_name(entity_id, self.embedding_model)
+        name = _collection_name(entity_id, self.embedding_model, self.schema_version)
         return client.get_or_create_collection(  # type: ignore[union-attr]
             name=name,
             metadata={"hnsw:space": "cosine"},
@@ -354,12 +374,12 @@ class ChromaVectorStore:
 
     def collection_name_for(self, entity_id: str) -> str:
         """Return the Chroma collection name for an entity (for testing/debugging)."""
-        return _collection_name(entity_id, self.embedding_model)
+        return _collection_name(entity_id, self.embedding_model, self.schema_version)
 
     def delete_collection(self, entity_id: str) -> None:
         """Delete the collection for an entity (primarily for test cleanup)."""
         client = self._get_client()
-        name = _collection_name(entity_id, self.embedding_model)
+        name = _collection_name(entity_id, self.embedding_model, self.schema_version)
         try:
             client.delete_collection(name)  # type: ignore[union-attr]
         except Exception:

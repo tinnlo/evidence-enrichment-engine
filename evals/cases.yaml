@@ -43,3 +43,16 @@ cases:
     expected_value: USA
     expected_decision: needs_review
     min_confidence: 0.50
+
+  - id: section_routing_html
+    description: >
+      Replay regression for hq_country on a document that has section-heading
+      markup in its source HTML.  Runs in replay mode (use_structured=False,
+      retrieved_chunks_map=None) so this case does NOT exercise the hierarchical
+      retriever or section-aware chunking; it only guards the baseline
+      hq_country extraction path against regressions.
+    entity_file: evals/fixtures/microsoft.json
+    replay_bundle: examples/replay/microsoft_hq_country_section_routing.json
+    expected_value: USA
+    expected_decision: auto_approve
+    min_confidence: 0.85

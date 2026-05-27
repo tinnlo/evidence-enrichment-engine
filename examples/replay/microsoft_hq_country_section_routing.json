@@ -1,0 +1,57 @@
+{
+  "search_results": [
+    {
+      "url": "https://www.microsoft.com/en-us/about",
+      "title": "About Microsoft \u2014 Company Overview",
+      "snippet": "Microsoft Corporation is headquartered in Redmond, Washington, United States.",
+      "provider": "replay",
+      "rank": 1,
+      "domain": "microsoft.com",
+      "source_tier": "official"
+    }
+  ],
+  "parsed_documents": [
+    {
+      "url": "https://www.microsoft.com/en-us/about",
+      "title": "About Microsoft \u2014 Company Overview",
+      "content_type": "text/html",
+      "text": "Company Overview\n\nMicrosoft Corporation\nMicrosoft Corporation is a multinational technology company incorporated under the laws of the State of Washington, United States.\n\nCorporate Headquarters\nThe Company's principal executive offices are located at One Microsoft Way, Redmond, Washington 98052, USA. The registered jurisdiction of incorporation is the State of Washington, United States of America. All material legal and regulatory correspondence is directed to the Redmond, WA headquarters.\n\nProducts and Services\nMicrosoft develops, manufactures, licenses, and supports a broad range of software products and services for various types of computing devices. Major product categories include Productivity and Business Processes, Intelligent Cloud, and More Personal Computing.\n\nRevenue and Financial Highlights\nFor the fiscal year ended June 30, 2024, Microsoft reported total revenue of $245.1 billion USD. Operating income was $109.4 billion USD. The company employs approximately 228,000 full-time employees worldwide.\n\nEnvironmental and Sustainability\nMicrosoft has committed to being carbon negative by 2030. The company's principal sustainability operations are managed from Redmond, Washington, United States.\n\nContact Information\nInvestor Relations: One Microsoft Way, Redmond, WA 98052-6399, United States.\n",
+      "excerpt": "Microsoft Corporation is a multinational technology company incorporated under the laws of the State of Washington, United States.",
+      "document_type": "company_website",
+      "entity_match_score": 0.98,
+      "source_authority_score": 0.97,
+      "freshness_score": 0.95,
+      "accepted_for_analysis": true,
+      "rejection_reason": null
+    }
+  ],
+  "analysis_reports": [
+    {
+      "source_url": "https://www.microsoft.com/en-us/about",
+      "reasoning": "The 'Corporate Headquarters' section explicitly states the company's principal executive offices are in Redmond, Washington, USA. The jurisdiction of incorporation is also the State of Washington, United States.",
+      "claims": [
+        {
+          "field_name": "hq_country",
+          "candidate_value": "USA",
+          "supporting_excerpt": "The Company's principal executive offices are located at One Microsoft Way, Redmond, Washington 98052, USA.",
+          "source_url": "https://www.microsoft.com/en-us/about",
+          "source_title": "About Microsoft \u2014 Company Overview",
+          "analysis_confidence": 0.97,
+          "source_authority_score": 0.97,
+          "freshness_score": 0.95,
+          "entity_match_score": 0.98
+        }
+      ]
+    }
+  ],
+  "synthesis": {
+    "value": "USA",
+    "normalized_value": "USA",
+    "reasoning": "The structured Corporate Headquarters section of the official Microsoft website unambiguously places principal offices in Redmond, Washington, USA.",
+    "synthesis_confidence": 0.97,
+    "supporting_urls": [
+      "https://www.microsoft.com/en-us/about"
+    ],
+    "conflicts": []
+  }
+}

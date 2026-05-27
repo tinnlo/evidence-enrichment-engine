@@ -280,6 +280,7 @@ class EvidenceCoordinator:
             store = ChromaVectorStore(
                 persist_path=rc.persist_path,
                 embedding_model=rc.embedding_model,
+                schema_version=rc.schema_version,
             )
             # Route chunker based on config
             if rc.chunker == "hierarchical":

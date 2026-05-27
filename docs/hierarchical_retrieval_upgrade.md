@@ -1,6 +1,6 @@
 # Hierarchical Retrieval & Schema Extraction Upgrade Plan
 
-*Created: 2026-05-25 · Revised: 2026-05-26 (r3 — post-implementation sync)*
+*Created: 2026-05-25 · Revised: 2026-05-26 (r5 — Stage E complete)*
 
 Addresses three production-quality gaps not covered by the existing [upgrade-plan](../.opencode/plans/upgrade-plan.md):
 
@@ -14,15 +14,30 @@ This plan is **staged and backward-compatible**. The existing `TableAwareChunker
 
 ## Implementation Status (as of 2026-05-26)
 
-Stages A, B, and C are **fully implemented and passing** (`444 passed, 7 skipped`).
-Stage D (migration, evals, acceptance) is the remaining deliverable.
+All five stages are **fully implemented and passing** (`456 passed, 7 skipped`).
 
-| Stage | Status | Test file | Tests |
+> **Stage D scope note:** Stage D is closed within the scope documented below.
+> The `section_routing_html` eval case is a replay regression only
+> (`use_structured=False`, `retrieved_chunks_map=None`); it does not exercise
+> the hierarchical retriever or section-aware chunking end-to-end.  The live /
+> structured hierarchical eval is covered by **Stage E**.
+
+| Stage | Status | Test file / artifact | Tests / cases |
 |---|---|---|---|
 | A — Hierarchical doc model + parsers | Complete | `tests/test_hierarchical.py` | 42 |
 | B — Two-stage retrieval + coordinator wiring | Complete | `tests/test_hierarchical.py` | (included above) |
 | C — Schema extraction package | Complete | `tests/test_extraction.py` | 45 |
-| D — Migration, evals, acceptance | Not started | — | — |
+| D — Migration, evals, acceptance | Complete (replay-only eval scope; see note above) | see below | — |
+| E — End-to-end hierarchical retrieval eval | **Complete** | `tests/test_hierarchical.py::TestEndToEndHierarchicalRetrieval` | 3 |
+
+**Stage D deliverables:**
+
+| Deliverable | File | Notes |
+|---|---|---|
+| Migration / reindex script | `scripts/migrate_to_hierarchical.py` | Re-parses v1 chunks via `GenericTextParser`, re-chunks with `HierarchicalChunker`, writes to `_v2` Chroma collection. `--dry-run` and `--delete-v1` flags. |
+| New eval case | `evals/cases.yaml` `section_routing_html` | Replay regression for `hq_country` on a document with section-heading markup. Runs in replay mode (`use_structured=False`, `retrieved_chunks_map=None`) — guards the baseline extraction path only; does **not** exercise the hierarchical retriever or section-aware chunking. All 7 cases pass. |
+| Acceptance harness | `evals/run_acceptance.py` | 5 schema-extraction cases covering `geographic_revenue`, `scope_1_emissions`, `headcount_by_region`, gate hard-fail, and provenance enforcement. All acceptance criteria pass. |
+| Retriever parity tests | `tests/test_retrieval_agent.py` | 8 new parametrized tests confirming `RetrievalAgent` behaves identically with `HybridRetriever` and `HierarchicalRetriever` stub interfaces. |
 
 ### Key implementation decisions that diverged from this plan
 
@@ -953,7 +968,10 @@ Add to `evals/cases.yaml`:
   entity_id: microsoft
   field_name: hq_country
   document_url: "<10-K-html-url>"
-  note: "Regression: existing field must still work under hierarchical retriever"
+  note: >
+    Replay regression only — runs with use_structured=False and
+    retrieved_chunks_map=None.  Guards baseline hq_country extraction;
+    does NOT exercise hierarchical retriever or section-aware chunking.
 ```
 
 ### D3. `RetrievalAgent` parity
@@ -972,6 +990,35 @@ Add to `evals/cases.yaml`:
 | C | Schema registry, extractor, repair, additive `ExtractionResult` artifact | ~8 hrs |
 | D | Migration, eval cases, `RetrievalAgent` parity tests | ~4 hrs |
 | **Total** | | **~30 hrs** |
+
+---
+
+## Stage E — End-to-end hierarchical retrieval eval
+
+**Status:** Complete (`tests/test_hierarchical.py::TestEndToEndHierarchicalRetrieval`, 3 tests, 456 passed total)
+
+**Goal:** Prove that the live hierarchical path (`use_structured=True`,
+`HierarchicalChunker`, `HierarchicalRetriever`, `retrieved_chunks_map` populated)
+produces correct answers on at least one field, end-to-end.  The existing
+`section_routing_html` replay case cannot cover this because the coordinator
+hardcodes `use_structured=False` and `retrieved_chunks_map=None` in replay mode,
+and the replay bundle contains no `sections` or `blocks` payload.
+
+**Implementation chosen:** Fixture-based (Option 1) — no live LLM or network calls.
+A `ParsedDocument` with a two-level section tree (`Corporate Headquarters` and
+`Risk Factors`) is constructed in-memory, indexed via `HierarchicalChunker` into
+a temporary Chroma `PersistentClient`, and queried via `HierarchicalRetriever`
+with a deterministic SHA-256 stub embedder.  This mirrors exactly what
+`coordinator._stage_retrieval` does when `chunker="hierarchical"` and
+`retriever="hierarchical"`.
+
+**Success criteria — all met:**
+
+| Criterion | Test | Result |
+|---|---|---|
+| `retrieved_chunks_map` is non-`None` and populated after retrieve() | `test_e1_retrieved_chunks_map_is_populated` | Pass |
+| Every returned chunk carries non-empty `section_id` and `section_path_str` | `test_e2_chunks_carry_section_id_and_section_path_str` | Pass |
+| Top hit (`hits[0]`) comes from hq_section, not risk_section — the most relevant section ranks first, not merely appears | `test_e3_top_chunk_content_from_correct_section` | Pass |
 
 ---
 

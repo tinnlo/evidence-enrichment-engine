@@ -370,7 +370,7 @@ MCP defaults to replay mode, so the server works without provider credentials.
 |---|---|---|---|
 | Baseline replay | `USA` from weak secondary evidence | `needs_review` | `0.75` |
 | Assessed replay | `USA` from agreeing primary sources | `auto_approve` | `0.97` |
-| Eval harness | replay cases pass against expectations | `6/6 pass` | case-dependent |
+| Eval harness | replay cases pass against expectations | `7/7 pass` | case-dependent |
 
 Replay bundles included in the repo:
 
@@ -382,6 +382,8 @@ Replay bundles included in the repo:
 | `microsoft_hq_country_no_support` | `auto_reject` | No accepted claims found |
 | `microsoft_hq_country_invalid_iso3` | `auto_reject` | Non-ISO3 synthesis output |
 | `microsoft_hq_country_low_signal` | `needs_review` | Single low-confidence claim |
+| `microsoft_hq_country_section_routing` | `auto_approve` | Document with section-heading markup; replay regression for `hq_country` (`section_routing_html` eval case) |
+| `microsoft_hq_country_retrieval_demo` | — | Standalone retrieval demo bundle; not an eval case |
 
 ## Docker
 

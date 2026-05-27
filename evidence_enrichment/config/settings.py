@@ -378,6 +378,11 @@ class RetrievalConfig(BaseModel):
     # Stage C — typed schema extraction
     schema_validation: bool = False
     schema_repair_max_attempts: int = 2
+    # Collection schema version.
+    # 1 = flat/TableAware collections (default; unchanged by migration).
+    # 2 = hierarchical collections produced by scripts/migrate_to_hierarchical.py.
+    # Switch to 2 after a successful migration to activate the _v2 collections.
+    schema_version: int = 1
 
     @model_validator(mode="after")
     def _coerce_chunker_for_hierarchical_retriever(self) -> "RetrievalConfig":

@@ -321,3 +321,84 @@ class TestRetrievalAgentPartialError:
         # successful_calls == 1 (first URL returned before second raised), so
         # query_chars must be included.
         assert err.query_char_history == [len(query)]
+
+
+# ---------------------------------------------------------------------------
+# D4 — Retriever parity: RetrievalAgent works identically with HybridRetriever
+# and HierarchicalRetriever stub interfaces.
+# ---------------------------------------------------------------------------
+
+class StubHierarchicalRetriever(StubRetriever):
+    """Minimal HierarchicalRetriever stand-in.
+
+    Adds a ``section_top_k`` attribute (present on the real
+    ``HierarchicalRetriever``) and a no-op ``_ensure_descendant_map`` to
+    confirm that ``RetrievalAgent`` never calls private methods on its
+    wrapped retriever — it only calls ``retrieve()``.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.section_top_k = 3
+        self._ensure_descendant_map_calls: int = 0
+
+    def _ensure_descendant_map(self, document_url: str) -> None:  # pragma: no cover
+        # Should never be called by RetrievalAgent.
+        self._ensure_descendant_map_calls += 1
+
+
+@pytest.mark.parametrize(
+    "retriever_cls,label",
+    [
+        (StubRetriever, "hybrid"),
+        (StubHierarchicalRetriever, "hierarchical"),
+    ],
+)
+class TestRetrievalAgentRetrieverParity:
+    """RetrievalAgent must behave identically regardless of which retriever it wraps.
+
+    All tests use the stub interface — no Chroma or OpenAI calls.  The suite
+    confirms that ``RetrievalAgent`` only depends on the public ``retrieve()``
+    method, not on retriever-specific internals.
+    """
+
+    def test_happy_path_returns_results(self, retriever_cls, label):
+        """Agent returns results for both retriever types."""
+        stub = retriever_cls(results_per_call=[[_make_result(0.85)]])
+        agent = RetrievalAgent(stub, max_iterations=3)
+        results = agent.retrieve("headquarters country", "https://example.com/doc")
+        assert results, f"[{label}] expected non-empty results"
+        assert results[0].score == pytest.approx(0.85), f"[{label}] score mismatch"
+
+    def test_refinement_loop_runs_for_both(self, retriever_cls, label):
+        """Agent runs at least 2 iterations when first score is below threshold."""
+        stub = retriever_cls(
+            results_per_call=[
+                [_make_result(0.3)],   # first call — below threshold
+                [_make_result(0.9)],   # second call — above threshold
+            ]
+        )
+        agent = RetrievalAgent(stub, max_iterations=3)
+        results = agent.retrieve("headquarters", "https://example.com/doc")
+        assert stub.retrieve_call_count >= 2, (
+            f"[{label}] expected >=2 iterations, got {stub.retrieve_call_count}"
+        )
+        assert results, f"[{label}] expected results after refinement"
+
+    def test_empty_results_handled_gracefully(self, retriever_cls, label):
+        """Agent returns empty list when retriever consistently returns nothing."""
+        stub = retriever_cls(results_per_call=[[]])
+        agent = RetrievalAgent(stub, max_iterations=2)
+        results = agent.retrieve("obscure query", "https://example.com/doc")
+        assert isinstance(results, list), f"[{label}] expected list return type"
+
+    def test_agent_does_not_call_private_methods(self, retriever_cls, label):
+        """RetrievalAgent only calls retrieve() — no private retriever methods."""
+        stub = retriever_cls(results_per_call=[[_make_result(0.8)]])
+        agent = RetrievalAgent(stub, max_iterations=1)
+        agent.retrieve("query", "https://example.com/doc")
+        # StubHierarchicalRetriever tracks _ensure_descendant_map calls.
+        if hasattr(stub, "_ensure_descendant_map_calls"):
+            assert stub._ensure_descendant_map_calls == 0, (
+                f"[{label}] RetrievalAgent must not call private retriever methods"
+            )
