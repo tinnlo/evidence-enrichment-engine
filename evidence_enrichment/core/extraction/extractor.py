@@ -25,7 +25,6 @@ Design constraints
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 import json
 import logging
